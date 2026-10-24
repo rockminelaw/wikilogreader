@@ -303,3 +303,25 @@ def test_pipeline_end_to_end(tmp_path):
     m = rows[1381682188]
     assert m["reverted"] == 0 and m["reverted_48h"] == 0
     assert "Category:FBC Melgar seasons" in m["added_text"]
+
+
+# ---------- command line ----------
+
+
+def test_cli_health_stats_backup(tmp_path, monkeypatch, capsys):
+    from wikirevert.__main__ import main
+
+    path = tmp_path / "e.sqlite"
+    monkeypatch.setenv("WRR_DB_PATH", str(path))
+    assert main(["health"]) == 1 and not path.exists()  # never creates the database
+    conn = db.connect(str(path))
+    db.init(conn)
+    assert main(["health"]) == 1  # no events yet
+    db.insert_edits(conn, [], '[{"offset":1}]')
+    assert main(["health"]) == 0
+    assert main(["stats"]) == 0
+    dest = tmp_path / "copy.sqlite"
+    assert main(["backup", str(dest)]) == 0
+    copy = sqlite3.connect(dest)
+    assert copy.execute("SELECT value FROM state WHERE key='last_event_id'").fetchone()[0] == '[{"offset":1}]'
+    assert not (tmp_path / "copy.sqlite.part").exists()

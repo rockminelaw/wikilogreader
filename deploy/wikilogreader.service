@@ -1,0 +1,21 @@
+[Unit]
+Description=Wikipedia edit collector (wikilogreader)
+Documentation=https://github.com/rockminelaw/wikilogreader
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=wikilogreader
+Group=wikilogreader
+WorkingDirectory=/var/lib/wikilogreader
+Environment=WRR_DB_PATH=/var/lib/wikilogreader/edits.sqlite
+# Optional settings (WRR_* variables, see README) go in this file.
+EnvironmentFile=-/etc/wikilogreader.env
+ExecStart=/opt/wikilogreader/.venv/bin/python -m wikirevert run
+Restart=always
+RestartSec=15
+TimeoutStopSec=45
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

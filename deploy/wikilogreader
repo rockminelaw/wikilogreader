@@ -1,0 +1,14 @@
+#!/bin/sh
+# Run a collector command as the service user, e.g.
+#   wikilogreader stats
+#   wikilogreader backup /var/lib/wikilogreader/edits-copy.sqlite
+set -e
+set -a
+[ -r /etc/wikilogreader.env ] && . /etc/wikilogreader.env
+set +a
+export WRR_DB_PATH="${WRR_DB_PATH:-/var/lib/wikilogreader/edits.sqlite}"
+if [ "$(id -u)" -eq 0 ]; then
+    exec runuser -u wikilogreader -- env WRR_DB_PATH="$WRR_DB_PATH" \
+        /opt/wikilogreader/.venv/bin/python -m wikirevert "$@"
+fi
+exec /opt/wikilogreader/.venv/bin/python -m wikirevert "$@"

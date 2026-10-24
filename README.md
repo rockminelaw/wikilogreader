@@ -75,31 +75,55 @@ These matter for how the results can be read later.
 
 ## Running it
 
-It needs Docker. On Windows or macOS that's Docker Desktop, and the computer
-has to stay on and awake for the weeks it runs; a small always-on Linux box or
-VPS is easier.
+It needs a machine that stays on for the weeks it runs. There are three ways
+to set it up.
+
+### On a Proxmox VE host (what I use)
+
+From the Proxmox web UI, open the host's **Shell** and run:
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/rockminelaw/wikilogreader/main/deploy/proxmox-create-ct.sh)"
+```
+
+This creates an unprivileged Debian 13 container (2 cores, 1 GB of memory,
+a 64 GB disk, DHCP on `vmbr0`) that starts with the host, and installs the
+collector inside it as a systemd service running under its own user. A timer
+checks every 10 minutes and restarts the service if no stream events have
+been stored for 15 minutes. Settings can be changed with variables, for
+example `STORAGE=local-zfs DISK_GB=100`.
+
+Inside the container (`pct enter <id>` on the host):
+
+```sh
+journalctl -u wikilogreader -f        # live log, progress line every 5 minutes
+wikilogreader stats                   # counts as JSON
+wikilogreader backup /var/lib/wikilogreader/edits-copy.sqlite
+bash /opt/wikilogreader/deploy/install.sh   # update to the latest code
+```
+
+`backup` makes a consistent copy while the collector keeps running. To get the
+copy onto the Proxmox host: `pct pull <id> /var/lib/wikilogreader/edits-copy.sqlite /root/edits.sqlite`.
+Optional settings go in `/etc/wikilogreader.env` as `WRR_*=value` lines,
+followed by `systemctl restart wikilogreader`.
+
+### On any Debian or Ubuntu machine
+
+As root: `git clone https://github.com/rockminelaw/wikilogreader /opt/wikilogreader`
+then `bash /opt/wikilogreader/deploy/install.sh`. Same commands as above.
+
+### With Docker
 
 ```sh
 docker compose up -d --build
 docker compose logs -f            # progress line every 5 minutes
 docker compose exec collector python -m wikirevert stats
+docker compose exec collector python -m wikirevert backup /data/edits-copy.sqlite
+docker compose cp collector:/data/edits-copy.sqlite ./edits.sqlite
 ```
 
-The data lives in the `wrr-data` Docker volume. To copy the database out
-(stop first so the copy is consistent):
-
-```sh
-docker compose stop
-docker compose cp collector:/data/edits.sqlite ./edits.sqlite
-docker compose start
-```
-
-Without Docker:
-
-```sh
-pip install .
-python -m wikirevert run          # writes to data/edits.sqlite
-```
+The data lives in the `wrr-data` Docker volume. On Windows or macOS that's
+Docker Desktop, and the computer has to stay on and awake.
 
 ### Settings
 
@@ -145,7 +169,10 @@ takes four or five days including the 48-hour wait. In a short test the
 stored diff data averaged about 9 KB per edit (median about 2 KB; a few large
 list edits pull the average up), so expect roughly 1 GB per 100,000 edits.
 That estimate came from only 40 diffs and will be updated once the collector
-has run for a while.
+has run for a while. At that rate the database grows about 1.2 GB a day, so the
+Proxmox container's 64 GB disk lasts around seven weeks. Check with `df -h /`
+inside the container; on the host, `pct resize <id> rootfs +32G` adds space
+without stopping it.
 
 ## Privacy
 

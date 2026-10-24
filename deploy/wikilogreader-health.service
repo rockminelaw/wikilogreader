@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart wikilogreader if it has stopped storing stream events
+After=wikilogreader.service
+
+[Service]
+Type=oneshot
+# The check runs as the service user so it never leaves root-owned database
+# files behind. Restarts only if the service is meant to be running.
+ExecStart=/bin/sh -c 'systemctl is-active --quiet wikilogreader.service || exit 0; /usr/local/bin/wikilogreader health --max-age 900 && exit 0; echo "No stream events stored for 15 minutes, restarting"; systemctl restart wikilogreader.service'
