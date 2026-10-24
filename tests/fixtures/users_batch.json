@@ -1,0 +1,63 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "users": [
+   {
+    "userid": 56355647,
+    "name": "~2026-56098-08",
+    "editcount": 6,
+    "registration": "2026-10-20T23:55:12Z",
+    "groups": [
+     "*",
+     "temp"
+    ]
+   },
+   {
+    "userid": 41656482,
+    "name": "ROLAND CES",
+    "editcount": 4611,
+    "registration": "2021-04-18T18:34:14Z",
+    "groups": [
+     "extendedconfirmed",
+     "*",
+     "user",
+     "autoconfirmed"
+    ]
+   },
+   {
+    "userid": 52782812,
+    "name": "AriuCH",
+    "editcount": 13407,
+    "registration": "2026-03-12T21:26:34Z",
+    "groups": [
+     "extendedconfirmed",
+     "patroller",
+     "reviewer",
+     "rollbacker",
+     "temporary-account-viewer",
+     "*",
+     "user",
+     "autoconfirmed"
+    ]
+   },
+   {
+    "userid": 24,
+    "name": "Jimbo Wales",
+    "editcount": 15135,
+    "registration": "2001-03-27T20:47:31Z",
+    "groups": [
+     "extendedconfirmed",
+     "founder",
+     "reviewer",
+     "*",
+     "user",
+     "autoconfirmed"
+    ]
+   },
+   {
+    "name": "NoSuchUserXyz123",
+    "missing": true
+   }
+  ]
+ }
+}

@@ -1,0 +1,8 @@
+{
+ "error": {
+  "code": "nosuchrevid",
+  "info": "There is no revision with ID 2.",
+  "docref": "See https://en.wikipedia.org/w/api.php for API usage. Subscribe to the mediawiki-api-announce mailing list at &lt;https://lists.wikimedia.org/postorius/lists/mediawiki-api-announce.lists.wikimedia.org/&gt; for notice of API deprecations and breaking changes."
+ },
+ "servedby": "mw-api-ext.eqiad.main-5f8dd6899c-j8jxt"
+}

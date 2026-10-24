@@ -1,0 +1,96 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 32978,
+    "ns": 4,
+    "title": "Wikipedia:Wikipedians",
+    "revisions": [
+     {
+      "revid": 1,
+      "parentid": 294750,
+      "minor": true,
+      "user": "Luis Oliveira",
+      "timestamp": "2002-01-26T14:25:19Z",
+      "sha1": "0dc7b6ceb0e76671e1675e78f5051349b4a61129",
+      "tags": []
+     }
+    ]
+   },
+   {
+    "pageid": 1385937,
+    "ns": 0,
+    "title": "Kimberly Guilfoyle",
+    "revisions": [
+     {
+      "revid": 1381246160,
+      "parentid": 1381156270,
+      "minor": false,
+      "user": "~2026-56098-08",
+      "temp": true,
+      "timestamp": "2026-10-20T23:56:52Z",
+      "sha1": "76e6241ea4b02b077a012a43761d94c64d84a80d",
+      "tags": [
+       "visualeditor",
+       "mw-reverted"
+      ]
+     },
+     {
+      "revid": 1381246404,
+      "parentid": 1381246160,
+      "minor": false,
+      "user": "~2026-56098-08",
+      "temp": true,
+      "timestamp": "2026-10-20T23:59:44Z",
+      "sha1": "7c9b45bab41ff3773f650c769ffcd42d718da1a3",
+      "tags": [
+       "visualeditor",
+       "mw-reverted"
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 70981114,
+    "ns": 0,
+    "title": "All the Young Dudes (fan fiction)",
+    "revisions": [
+     {
+      "revid": 1381246410,
+      "parentid": 1381097829,
+      "minor": false,
+      "user": "CosmoWriter",
+      "timestamp": "2026-10-20T23:59:48Z",
+      "sha1": "b2ffc8c06b31108245a08d72f82ddfbe3a636ae2",
+      "tags": [
+       "visualeditor",
+       "mw-reverted",
+       "editcheck-newreference"
+      ]
+     }
+    ]
+   },
+   {
+    "pageid": 84605883,
+    "ns": 0,
+    "title": "1996 FBC Melgar season",
+    "revisions": [
+     {
+      "revid": 1381682188,
+      "parentid": 1381682133,
+      "minor": false,
+      "user": "ROLAND CES",
+      "timestamp": "2026-10-24T03:00:12Z",
+      "sha1": "07e9c630ce0b04f3983e0a294953fcd9ad3e821b",
+      "tags": [
+       "mobile edit",
+       "mobile web edit",
+       "advanced mobile edit"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

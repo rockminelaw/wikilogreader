@@ -1,0 +1,32 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "badrevids": {
+   "999999999999": {
+    "revid": 999999999999,
+    "missing": true
+   }
+  },
+  "pages": [
+   {
+    "pageid": 1385937,
+    "ns": 0,
+    "title": "Kimberly Guilfoyle",
+    "revisions": [
+     {
+      "revid": 1381246404,
+      "parentid": 1381246160,
+      "user": "~2026-56098-08",
+      "temp": true,
+      "timestamp": "2026-10-20T23:59:44Z",
+      "sha1": "7c9b45bab41ff3773f650c769ffcd42d718da1a3",
+      "tags": [
+       "visualeditor",
+       "mw-reverted"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

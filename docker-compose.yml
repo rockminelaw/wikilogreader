@@ -1,0 +1,20 @@
+services:
+  collector:
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # A named volume, not a folder bind mount: SQLite's WAL mode needs a real
+    # Linux filesystem, which bind mounts from Windows or macOS don't provide.
+    volumes:
+      - wrr-data:/data
+    environment:
+      WRR_LABEL_DELAY_HOURS: "48"
+      # WRR_API_TOKEN: "..."   # optional personal OAuth 2 token, see README
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  wrr-data:

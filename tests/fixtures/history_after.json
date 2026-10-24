@@ -1,0 +1,59 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "pages": [
+   {
+    "pageid": 1385937,
+    "ns": 0,
+    "title": "Kimberly Guilfoyle",
+    "revisions": [
+     {
+      "revid": 1381246404,
+      "parentid": 1381246160,
+      "user": "~2026-56098-08",
+      "temp": true,
+      "timestamp": "2026-10-20T23:59:44Z",
+      "sha1": "7c9b45bab41ff3773f650c769ffcd42d718da1a3",
+      "tags": [
+       "visualeditor",
+       "mw-reverted"
+      ]
+     },
+     {
+      "revid": 1381246584,
+      "parentid": 1381246404,
+      "user": "Discospinster",
+      "timestamp": "2026-10-21T00:01:53Z",
+      "sha1": "200ad095d026e9e625e4277750ba287ab254d619",
+      "tags": [
+       "huggle",
+       "mw-rollback"
+      ]
+     },
+     {
+      "revid": 1381668351,
+      "parentid": 1381246584,
+      "user": "Abs145",
+      "timestamp": "2026-10-24T00:58:34Z",
+      "sha1": "aade9d0e03fc70c94792909c59bb6ee9cee84a7c",
+      "tags": [
+       "visualeditor",
+       "editcheck-newreference",
+       "editcheck-newcontent"
+      ]
+     },
+     {
+      "revid": 1381670438,
+      "parentid": 1381668351,
+      "user": "Pemilligan",
+      "timestamp": "2026-10-24T01:18:31Z",
+      "sha1": "5e9c8989a62ace12c87f7f689e22a3630ffd9761",
+      "tags": [
+       "wikieditor"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

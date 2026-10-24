@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wikirevert"
+version = "0.1.0"
+description = "Collects English Wikipedia edits, their diffs and whether they were reverted"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "lxml>=5.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["wikirevert"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

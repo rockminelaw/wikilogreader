@@ -1,0 +1,16 @@
+{
+ "compare": {
+  "fromid": 84605883,
+  "fromrevid": 1381682133,
+  "fromns": 0,
+  "fromtitle": "1996 FBC Melgar season",
+  "fromsize": 3739,
+  "toid": 84605883,
+  "torevid": 1381682188,
+  "tons": 0,
+  "totitle": "1996 FBC Melgar season",
+  "tosize": 3975,
+  "diffsize": 1882,
+  "body": "<tr>\n  <td colspan=\"2\" class=\"diff-lineno\">Line 118:</td>\n  <td colspan=\"2\" class=\"diff-lineno\">Line 118:</td>\n</tr>\n<tr>\n  <td class=\"diff-marker\"></td>\n  <td class=\"diff-context diff-side-deleted\"><div>== References ==</div></td>\n  <td class=\"diff-marker\"></td>\n  <td class=\"diff-context diff-side-added\"><div>== References ==</div></td>\n</tr>\n<tr>\n  <td class=\"diff-marker\"></td>\n  <td class=\"diff-context diff-side-deleted\"><div>{{Reflist}}</div></td>\n  <td class=\"diff-marker\"></td>\n  <td class=\"diff-context diff-side-added\"><div>{{Reflist}}</div></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><br /></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><div>[[Category:FBC Melgar seasons]]</div></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><div>[[Category:1996 Torneo Descentralizado|FBC Melgar]]</div></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><div>[[Category:Peruvian football clubs 1996 season|FBC Melgar]]</div></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><div>[[Category:1996 in Peruvian football]]</div></td>\n</tr>\n<tr>\n  <td colspan=\"2\" class=\"diff-empty diff-side-deleted\"></td>\n  <td class=\"diff-marker\" data-marker=\"+\"></td>\n  <td class=\"diff-addedline diff-side-added\"><div>[[Category:Association football clubs 1996 season]]</div></td>\n</tr>\n"
+ }
+}
