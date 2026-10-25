@@ -57,17 +57,23 @@ if ! pct start "$CTID" || [ "$(pct status "$CTID" | awk '{print $2}')" != runnin
     exit 1
 fi
 
-echo "==> Waiting for the network"
-for _ in $(seq 1 60); do
-    if pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null 2>&1; then
-        break
+echo "==> Waiting for the network (up to 2 minutes)"
+net_ok() { timeout 5 pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null 2>&1; }
+deadline=$((SECONDS + 120))
+until net_ok; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+        echo "The container has no working network after 2 minutes." >&2
+        echo "  Its address:  $(pct exec "$CTID" -- ip -4 -br addr show eth0 2>/dev/null)" >&2
+        echo "  Its DNS:      $(pct exec "$CTID" -- grep nameserver /etc/resolv.conf 2>/dev/null | tr '\n' ' ')" >&2
+        echo "No address: your network may not offer DHCP; set a static IP with" >&2
+        echo "  pct set $CTID --net0 name=eth0,bridge=$BRIDGE,ip=192.168.x.y/24,gw=192.168.x.1" >&2
+        echo "Address but no DNS:  pct set $CTID --nameserver 1.1.1.1 && pct reboot $CTID" >&2
+        echo "Then finish with:" >&2
+        echo "  pct exec $CTID -- bash -c 'apt-get update && apt-get install -y git && git clone $REPO_URL /opt/wikilogreader && bash /opt/wikilogreader/deploy/install.sh'" >&2
+        exit 1
     fi
     sleep 2
 done
-pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null || {
-    echo "The container has no network. Check the bridge ($BRIDGE) and DHCP." >&2
-    exit 1
-}
 
 echo "==> Installing the collector inside the container"
 pct exec "$CTID" -- bash -c "
