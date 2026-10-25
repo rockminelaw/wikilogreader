@@ -26,10 +26,13 @@ if ! pvesm status --content rootdir | awk 'NR>1 {print $1}' | grep -qx "$STORAGE
     exit 1
 fi
 
-echo "==> Finding the latest Debian 13 template"
+ARCH="$(dpkg --print-architecture)"      # amd64 on Intel/AMD hosts
+echo "==> Finding the latest Debian 13 template for $ARCH"
 pveam update >/dev/null
-TEMPLATE="$(pveam available --section system | awk '{print $2}' | grep '^debian-13-standard' | sort -V | tail -1)"
-[ -n "$TEMPLATE" ] || { echo "No Debian 13 template found." >&2; exit 1; }
+# Proxmox lists templates for several architectures; take only this host's.
+TEMPLATE="$(pveam available --section system | awk '{print $2}' \
+    | grep "^debian-13-standard_.*_${ARCH}\.tar\." | sort -V | tail -1)"
+[ -n "$TEMPLATE" ] || { echo "No Debian 13 template for $ARCH found." >&2; exit 1; }
 if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
     pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
 fi
@@ -45,8 +48,14 @@ pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
     --rootfs "$STORAGE:$DISK_GB" \
     --net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" \
     --onboot 1 \
-    --start 1 \
     --description "Wikipedia edit collector: $REPO_URL"
+
+if ! pct start "$CTID" || [ "$(pct status "$CTID" | awk '{print $2}')" != running ]; then
+    echo "Container $CTID was created but would not start." >&2
+    echo "See why with:  pct start $CTID --debug" >&2
+    echo "Remove it with: pct destroy $CTID --purge" >&2
+    exit 1
+fi
 
 echo "==> Waiting for the network"
 for _ in $(seq 1 60); do
