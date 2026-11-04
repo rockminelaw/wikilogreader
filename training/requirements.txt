@@ -1,0 +1,11 @@
+# Install PyTorch first, with CUDA, from the PyTorch index:
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cu130
+# then:  pip install -r training/requirements.txt
+transformers==5.22.1
+sentencepiece==0.2.2
+protobuf==7.36.1
+numpy>=2.0
+pandas>=2.2
+pyarrow>=17
+scikit-learn>=1.5
+lightgbm>=4.5
