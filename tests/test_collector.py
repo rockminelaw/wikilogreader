@@ -325,3 +325,54 @@ def test_cli_health_stats_backup(tmp_path, monkeypatch, capsys):
     copy = sqlite3.connect(dest)
     assert copy.execute("SELECT value FROM state WHERE key='last_event_id'").fetchone()[0] == '[{"offset":1}]'
     assert not (tmp_path / "copy.sqlite.part").exists()
+
+
+# ---------- export ----------
+
+
+def test_export_writes_only_complete_days(tmp_path):
+    import gzip as _gzip
+
+    from wikirevert.export import export
+
+    conn = db.connect(str(tmp_path / "e.sqlite"))
+    db.init(conn)
+    day = 86400
+    d0 = 1792800000 - 1792800000 % day  # a UTC midnight
+    now = d0 + 5 * day
+    base = dict(old_rev_id=1, rc_id=1, namespace=0, is_bot=0, is_anon=0, is_temp=0,
+                comment="c", minor=0, patrolled=None, size_old=1, size_new=2,
+                size_delta=1, meta_dt=None, received_at=0, title="T")
+    edits = [
+        dict(base, rev_id=10, ts=d0 + 100, user="Alice"),           # day 0, labelled
+        dict(base, rev_id=11, ts=d0 + 200, user="~2026-1-1"),       # day 0, labelled
+        dict(base, rev_id=20, ts=d0 + day + 5, user="Bob"),         # day 1, unlabelled
+        dict(base, rev_id=40, ts=d0 + 4 * day, user="Alice"),       # day 4, too recent
+    ]
+    db.insert_edits(conn, edits, None)
+    conn.execute("INSERT INTO diffs(rev_id, status, fetched_at, added_text) VALUES (10, 'ok', 0, ?)",
+                 ("x" * 5000,))
+    conn.execute("INSERT INTO labels(rev_id, checked_at, status, tags, reverted, reverted_48h) "
+                 "VALUES (10, 0, 'ok', 'mw-reverted', 1, 1), (11, 0, 'missing', NULL, NULL, NULL)")
+
+    out = tmp_path / "out"
+    lines = export(conn, str(out), label_delay_hours=48, max_chars=100, now=now)
+    files = sorted(p.name for p in out.iterdir())
+    assert files == [f"edits-{datetime_utc(d0)}.jsonl.gz"], lines
+    recs = [json.loads(x) for x in _gzip.open(out / files[0], "rt")]
+    assert [r["rev_id"] for r in recs] == [10, 11]
+    assert len(recs[0]["added_text"]) == 100
+    assert "user" not in recs[0] and "tags" not in recs[0]
+    assert recs[0]["user_hash"] and recs[0]["user_hash"] != recs[1]["user_hash"]
+    assert recs[1]["label_status"] == "missing"
+    assert any("1 edits still unlabelled" in x for x in lines)
+    assert any("not old enough" in x for x in lines)
+    # Running again keeps the same file and the same hashes.
+    again = export(conn, str(out), label_delay_hours=48, max_chars=100, now=now)
+    assert any("already exported" in x for x in again)
+
+
+def datetime_utc(ts):
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")

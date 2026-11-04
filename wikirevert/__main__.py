@@ -1,4 +1,4 @@
-"""Command line: python -m wikirevert {run,stats,health,backup}"""
+"""Command line: python -m wikirevert {run,stats,health,backup,export}"""
 
 from __future__ import annotations
 
@@ -23,6 +23,11 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--max-age", type=int, default=600, help="seconds (default 600)")
     b = sub.add_parser("backup", help="copy the database safely while the collector runs")
     b.add_argument("dest", help="file to write")
+    x = sub.add_parser("export", help="write one compact training file per fully labelled day")
+    x.add_argument("out_dir", nargs="?", default=None,
+                   help="folder to write to (default: export/ next to the database)")
+    x.add_argument("--max-chars", type=int, default=3000,
+                   help="cut each diff text field to this many characters (default 3000)")
     args = parser.parse_args(argv)
 
     settings = config.load()
@@ -60,6 +65,14 @@ def main(argv: list[str] | None = None) -> int:
         dest.close()
         os.replace(tmp, args.dest)
         print(f"wrote {args.dest} ({os.path.getsize(args.dest) / 1e6:.1f} MB)")
+        return 0
+    if args.cmd == "export":
+        from .export import export
+
+        out = args.out_dir or os.path.join(os.path.dirname(os.path.abspath(settings.db_path)), "export")
+        for line in export(conn, out, settings.label_delay_hours, args.max_chars):
+            print(line)
+        print(f"files are in {out}")
         return 0
     return 2
 

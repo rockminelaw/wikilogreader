@@ -102,6 +102,12 @@ wikilogreader backup /var/lib/wikilogreader/edits-copy.sqlite
 bash /opt/wikilogreader/deploy/install.sh   # update to the latest code
 ```
 
+For training, `wikilogreader export` writes one compact file per UTC day to
+`/var/lib/wikilogreader/export/` (`edits-YYYY-MM-DD.jsonl.gz`). It only writes
+days whose edits have all been labelled, leaves out the diff HTML and the
+tags read at labelling time, cuts each diff text field to 3,000 characters,
+and replaces usernames with a salted hash. Run it again later to add new days.
+
 `backup` makes a consistent copy while the collector keeps running. To get the
 copy onto the Proxmox host: `pct pull <id> /var/lib/wikilogreader/edits-copy.sqlite /root/edits.sqlite`.
 Optional settings go in `/etc/wikilogreader.env` as `WRR_*=value` lines,
