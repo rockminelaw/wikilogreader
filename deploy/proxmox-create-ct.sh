@@ -88,4 +88,4 @@ pct exec "$CTID" -- bash -c "
 echo
 echo "Done. Container $CTID is running the collector and starts with the host."
 echo "  Log:     pct exec $CTID -- journalctl -u wikilogreader -f"
-echo "  Counts:  pct exec $CTID -- wikilogreader stats"
+echo "  Counts:  pct exec $CTID -- /usr/local/bin/wikilogreader stats"

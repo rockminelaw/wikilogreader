@@ -93,7 +93,9 @@ checks every 10 minutes and restarts the service if no stream events have
 been stored for 15 minutes. Settings can be changed with variables, for
 example `STORAGE=local-zfs DISK_GB=100`.
 
-Inside the container (`pct enter <id>` on the host):
+Inside the container (`pct enter <id>` on the host). From the host with
+`pct exec <id> --`, give the full path, `/usr/local/bin/wikilogreader`,
+because `pct exec` doesn't search `/usr/local/bin`:
 
 ```sh
 journalctl -u wikilogreader -f        # live log, progress line every 5 minutes
