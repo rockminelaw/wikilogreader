@@ -15,8 +15,11 @@ Requests go out in a random order, so a run that stops early still leaves a
 uniform random sample. Results are appended to a JSON-lines file and a rerun
 skips edits already scored.
 
+The model card recommends the slower revertrisk-multilingual model for
+anonymous edits and the language-agnostic one for the rest; --model picks.
+
 Usage:
-    python -m training.liftwing --rev-ids FILE.parquet --out FILE.jsonl [--rate 8]
+    python -m training.liftwing --rev-ids FILE.parquet --out FILE.jsonl [--rate 8] [--model NAME]
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-URL = "https://api.wikimedia.org/service/lw/inference/v1/models/revertrisk-language-agnostic:predict"
+URL = "https://api.wikimedia.org/service/lw/inference/v1/models/{model}:predict"
 UA = ("WikiLogReader/0.1.0 (https://github.com/rockminelaw/wikilogreader; celarry1@gmail.com) "
       f"python-requests/{requests.__version__}")
 
@@ -69,12 +72,12 @@ def session():
     return s
 
 
-def score(rev_id: int, pacer: Pacer) -> dict:
+def score(rev_id: int, pacer: Pacer, url: str) -> dict:
     backoff = 5.0
     for _ in range(8):
         pacer.wait()
         try:
-            r = session().post(URL, json={"rev_id": int(rev_id), "lang": "en"}, timeout=30)
+            r = session().post(url, json={"rev_id": int(rev_id), "lang": "en"}, timeout=30)
         except requests.RequestException as exc:
             time.sleep(backoff)
             backoff = min(backoff * 2, 300)
@@ -103,6 +106,8 @@ def main(argv=None):
     ap.add_argument("--rate", type=float, default=8.0, help="requests per second (default 8)")
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--seed", type=int, default=13)
+    ap.add_argument("--model", default="revertrisk-language-agnostic",
+                    help="Lift Wing model; Wikimedia recommends revertrisk-multilingual for anonymous edits")
     args = ap.parse_args(argv)
 
     ids = pd.read_parquet(args.rev_ids, columns=["rev_id"]).rev_id.astype(int).unique()
@@ -117,7 +122,8 @@ def main(argv=None):
     pacer, lock = Pacer(args.rate), threading.Lock()
     t0, n, errors = time.time(), 0, 0
     with open(args.out, "a") as f, ThreadPoolExecutor(args.workers) as pool:
-        for res in pool.map(lambda r: score(r, pacer), todo):
+        url = URL.format(model=args.model)
+        for res in pool.map(lambda r: score(r, pacer, url), todo):
             with lock:
                 f.write(json.dumps(res) + "\n")
                 n += 1

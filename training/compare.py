@@ -23,7 +23,9 @@ NAMES = {
     "teacher": "Teacher (DeBERTa-v3-base, Platt-calibrated)",
     "gbdt_meta_diffstats": "GBDT, metadata + diff statistics",
     "gbdt_meta": "GBDT, metadata only",
-    "liftwing": "Wikimedia revert-risk (Lift Wing)",
+    "liftwing_mix": "Wikimedia revert-risk, recommended setup",
+    "liftwing": "Wikimedia revert-risk, language-agnostic",
+    "liftwing_ml": "Wikimedia revert-risk, multilingual",
     "rule_points": "Rules, points score",
     "anon_big_removal": "Rule: anonymous + removal of 500+ bytes",
     "profanity": "Rule: profanity added",
@@ -34,7 +36,7 @@ REL_CUTS = [0, .5, .8, .9, .95, .98, .99, .995, 1]
 # Reference palette (dataviz skill), light mode, fixed slot order.
 SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
-COLOUR = {"teacher": SLOTS[0], "gbdt_meta_diffstats": SLOTS[1], "liftwing": SLOTS[2],
+COLOUR = {"teacher": SLOTS[0], "gbdt_meta_diffstats": SLOTS[1], "liftwing_mix": SLOTS[2],
           "gbdt_meta": SLOTS[3], "rule_points": SLOTS[4]}
 
 
@@ -55,6 +57,15 @@ def load_scores(args, test: pd.DataFrame) -> pd.DataFrame:
         lw = pd.DataFrame(rows)
         lw = lw[lw.status == "ok"][["rev_id", "p"]].rename(columns={"p": "liftwing"})
         df = df.merge(lw.drop_duplicates("rev_id"), on="rev_id", how="left")
+    if getattr(args, "liftwing_ml", None) and os.path.exists(args.liftwing_ml):
+        rows = [json.loads(x) for x in open(args.liftwing_ml) if x.strip()]
+        ml = pd.DataFrame(rows)
+        ml = ml[ml.status == "ok"][["rev_id", "p"]].rename(columns={"p": "liftwing_ml"})
+        df = df.merge(ml.drop_duplicates("rev_id"), on="rev_id", how="left")
+        # Wikimedia's model card: multilingual model for anonymous edits,
+        # language-agnostic for the rest. The two output scales differ, so
+        # ranking across the mix is only as good as that recommendation.
+        df["liftwing_mix"] = np.where(df.is_anon == 1, df.liftwing_ml, df.liftwing)
     return df
 
 
@@ -141,7 +152,7 @@ def charts(df: pd.DataFrame, models, out: str) -> list[str]:
     plt.close(fig)
 
     # Reliability: groups by score percentile, finer at the top where flags are.
-    rel = [m for m in ("teacher", "gbdt_meta_diffstats", "liftwing") if m in models]
+    rel = [m for m in ("teacher", "gbdt_meta_diffstats", "liftwing_mix") if m in models]
     fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=150)
     fig.patch.set_facecolor(SURFACE)
     _style(ax)
@@ -175,7 +186,8 @@ def main(argv=None):
     ap.add_argument("--exports", required=True)
     ap.add_argument("--teacher", required=True)
     ap.add_argument("--baselines", required=True)
-    ap.add_argument("--liftwing", default=None)
+    ap.add_argument("--liftwing", default=None, help="language-agnostic scores (JSON lines)")
+    ap.add_argument("--liftwing-ml", default=None, help="multilingual scores for anonymous edits")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
@@ -185,12 +197,16 @@ def main(argv=None):
     models = [m for m in ORDER if m in df.columns]
     result = {"n_test": len(df), "positives": int(df.label.sum())}
 
-    full = [m for m in models if m != "liftwing"]
+    full = [m for m in models if not m.startswith("liftwing")]
     result["full_test"] = table(df, full).to_dict("records")
-    if "liftwing" in df:
-        both = df[df.liftwing.notna()]
+    lw_cols = [m for m in models if m.startswith("liftwing")]
+    if lw_cols:
+        both = df.dropna(subset=[c for c in lw_cols if c != "liftwing_ml"])
         result["liftwing_coverage"] = {"scored": int(len(both)), "of": int(len(df))}
-        result["with_liftwing"] = table(both, models).to_dict("records")
+        result["with_liftwing"] = table(both, [m for m in models if m != "liftwing_ml"]).to_dict("records")
+        anon = df[(df.is_anon == 1)].dropna(subset=lw_cols)
+        result["anonymous_slice"] = table(anon, models).to_dict("records")
+        result["anonymous_slice_n"] = int(len(anon))
         result["teacher_minus_liftwing_pr_auc"] = paired_diff(
             both.label.to_numpy(), both.teacher.to_numpy(), both.liftwing.to_numpy())
         df_chart = both
@@ -201,7 +217,7 @@ def main(argv=None):
 
     # Slices by editor type, with a 2% alert budget chosen over all edits.
     slices = {}
-    for m in [x for x in ("teacher", "gbdt_meta_diffstats", "liftwing") if x in df_chart]:
+    for m in [x for x in ("teacher", "gbdt_meta_diffstats", "liftwing", "liftwing_mix") if x in df_chart]:
         d = df_chart
         n = max(1, int(round(len(d) * 0.02)))
         top = d.nlargest(n, m)
@@ -220,7 +236,10 @@ def main(argv=None):
     result["charts"] = charts(df_chart, models, args.out)
     with open(os.path.join(args.out, "comparison.json"), "w") as f:
         json.dump(result, f, indent=2)
-    print(json.dumps({k: v for k, v in result.items() if k not in ("full_test", "with_liftwing")}, indent=2))
+    print(json.dumps({k: v for k, v in result.items()
+                      if k not in ("full_test", "with_liftwing", "anonymous_slice")}, indent=2))
+    for r in result.get("anonymous_slice", []):
+        print(f"ANON {r['name']:<42} PR-AUC {r['pr_auc']:.3f}  P@2% {r['p_at_2']:.3f}  R@2% {r['r_at_2']:.3f}")
     for r in result.get("with_liftwing", result["full_test"]):
         print(f"{r['name']:<42} PR-AUC {r['pr_auc']:.3f} [{r['pr_auc_ci'][0]:.3f}-{r['pr_auc_ci'][1]:.3f}]  "
               f"P@2% {r['p_at_2']:.3f}  R@2% {r['r_at_2']:.3f}  Brier {r['brier']:.4f}  ECE {r['ece']:.4f}")
