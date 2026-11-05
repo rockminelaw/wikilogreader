@@ -5,8 +5,8 @@ Class imbalance: about 5.5% of edits are positive. The model trains on the
 natural distribution with plain cross-entropy rather than reweighting, which
 keeps its probabilities meaningful; results are judged on PR-AUC and the
 precision at a fixed alert rate, not accuracy; and a one-parameter
-temperature is fitted on the validation day to calibrate the scores before
-they are reported on the test day.
+two-parameter (Platt) calibration is fitted on the validation day before the
+scores are reported on the test day.
 
 Usage (from the folder that contains training/):
     python -m training.train_teacher --exports ..\\wiki-export --out ..\\runs\\teacher-v1
@@ -151,7 +151,7 @@ def main(argv=None):
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    from training.metrics import evaluate, fit_temperature, sigmoid, summary_line
+    from training.metrics import evaluate, fit_platt, fit_temperature, sigmoid, summary_line
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -263,11 +263,14 @@ def main(argv=None):
     vlog = predict(model, tok, val.text.tolist(), args, device, dtype)
     tlog = predict(model, tok, test.text.tolist(), args, device, dtype)
     temp = fit_temperature(vlog, val.label.to_numpy())
+    a, b = fit_platt(vlog, val.label.to_numpy())
     raw = evaluate(test.label.to_numpy(), sigmoid(tlog))
-    cal = evaluate(test.label.to_numpy(), sigmoid(tlog / temp))
-    log(f"Temperature fitted on validation: {temp:.3f}")
+    cal_t = evaluate(test.label.to_numpy(), sigmoid(tlog / temp))
+    cal = evaluate(test.label.to_numpy(), sigmoid(a * tlog + b))
+    log(f"Fitted on validation: temperature {temp:.3f}; Platt a={a:.3f} b={b:.3f}")
     log(summary_line("test, raw", raw))
-    log(summary_line("test, calibrated", cal))
+    log(summary_line("test, temperature", cal_t))
+    log(summary_line("test, Platt", cal))
 
     lat = {"gpu" if device.type == "cuda" else "cpu": latency(model, tok, test.text.tolist(), args, device, 200)}
     if device.type == "cuda":
@@ -280,7 +283,8 @@ def main(argv=None):
         pd.DataFrame({"rev_id": test.rev_id, "split": "test", "label": test.label, "logit": tlog}),
     ]).to_parquet(os.path.join(args.out, "predictions.parquet"))
     with open(os.path.join(args.out, "metrics.json"), "w") as f:
-        json.dump({"args": vars(args), "temperature": temp, "test_raw": raw, "test_calibrated": cal,
+        json.dump({"args": vars(args), "temperature": temp, "platt": [a, b], "test_raw": raw,
+                   "test_temperature": cal_t, "test_calibrated": cal,
                    "best_val_pr_auc": best_ap, "latency": lat,
                    "train_edits": len(train), "train_minutes": (time.time() - t_start) / 60,
                    "device": torch.cuda.get_device_name(0) if device.type == "cuda" else platform.processor(),

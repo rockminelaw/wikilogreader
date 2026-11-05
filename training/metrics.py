@@ -73,6 +73,17 @@ def fit_temperature(logits: np.ndarray, y: np.ndarray) -> float:
     return (lo + hi) / 2
 
 
+def fit_platt(logits: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+    """Two-parameter calibration on held-out data: p = sigmoid(a * logit + b).
+    Unlike a temperature alone, the offset b can correct a model that is
+    overconfident across its middle range; unlike isotonic regression it keeps
+    the ranking, so PR-AUC is unchanged."""
+    from sklearn.linear_model import LogisticRegression
+
+    lr = LogisticRegression(C=1e6, max_iter=1000).fit(np.asarray(logits, dtype=float)[:, None], y)
+    return float(lr.coef_.ravel()[0]), float(lr.intercept_[0])
+
+
 def sigmoid(z):
     return 1 / (1 + np.exp(-np.asarray(z, dtype=float)))
 

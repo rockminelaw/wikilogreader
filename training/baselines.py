@@ -179,7 +179,7 @@ def main(argv=None):
         p = calibrate_levels(rv[name].to_numpy(), va.label.to_numpy(), rt[name].to_numpy())
         # Break ties between equal rule scores by the size of the removal, so
         # "top 2%" is well defined; probabilities are unchanged.
-        rank = p + 1e-9 * (-te.size_delta.fillna(0).clip(upper=0)).to_numpy() / 1e6
+        rank = p + 1e-12 * (-te.size_delta.fillna(0).clip(upper=0)).to_numpy() / 1e6
         m = evaluate(te.label, p)
         flagged = rt[name].to_numpy() > 0
         m["as_flag"] = {"flag_rate": float(flagged.mean()),
@@ -189,7 +189,8 @@ def main(argv=None):
         for r in (0.02, 0.05):
             m[f"at_{int(r * 100)}pct"] = at_alert_rate(te.label.to_numpy(), rank, r)
         metrics[name] = m
-        preds.append(pd.DataFrame({"rev_id": te.rev_id, "split": "test", "model": name, "score": p}))
+        # Save the tie-broken score, so other scripts rank the same way.
+        preds.append(pd.DataFrame({"rev_id": te.rev_id, "split": "test", "model": name, "score": rank}))
         print(summary_line(name, m), "| as a flag:", json.dumps(m["as_flag"]), flush=True)
 
     for name, with_diff in (("gbdt_meta", False), ("gbdt_meta_diffstats", True)):
