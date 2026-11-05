@@ -218,8 +218,18 @@ def test_api_retries_429_with_retry_after_then_succeeds():
         FakeResponse({"error": {"code": "maxlag", "info": "lag"}}, 200, {"Retry-After": "3"}),
         FakeResponse({"ok": True}),
     ])
-    api, sleeps = make_api(lambda p: next(responses))
+    clock = [0.0]
+    sleeps: list[float] = []
+
+    def sleep(sec):
+        sleeps.append(round(sec, 6))
+        clock[0] += sec
+
+    s = config.Settings(min_request_interval=0)
+    api = ApiClient(s, session=FakeSession(lambda p: next(responses)), sleep=sleep,
+                    clock=lambda: clock[0])
     assert api.get({"action": "query"}) == {"ok": True}
+    # Both waits go through the shared pause, so every thread would honour them.
     assert 7 in sleeps and 3 in sleeps and api.rate_limited == 1
     sent = api.session.calls[0]
     assert sent["maxlag"] == "5" and sent["formatversion"] == "2"
@@ -376,3 +386,51 @@ def datetime_utc(ts):
     from datetime import datetime, timezone
 
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+
+
+def test_concurrent_requests_are_capped():
+    import threading as _t
+
+    s = config.Settings(min_request_interval=0, api_concurrency=3)
+    active, peak, lock = [0], [0], _t.Lock()
+
+    def handler(p):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+        return FakeResponse({"ok": 1})
+
+    api = ApiClient(s, session=FakeSession(handler))
+    threads = [_t.Thread(target=api.get, args=({},)) for _ in range(9)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] == 3
+
+
+def test_diff_claims_prefer_fresh_edits_and_skip_bots(tmp_path):
+    s = config.Settings(db_path=str(tmp_path / "c.sqlite"), min_request_interval=0)
+    conn = db.connect(s.db_path)
+    db.init(conn)
+    now = int(time.time())
+    base = dict(old_rev_id=1, rc_id=1, namespace=0, is_anon=0, is_temp=0, comment="", minor=0,
+                patrolled=None, size_old=1, size_new=2, size_delta=1, meta_dt=None,
+                received_at=0, title="T", user="U")
+    db.insert_edits(conn, [
+        dict(base, rev_id=100, ts=now - 5 * 86400, is_bot=0),   # old backlog
+        dict(base, rev_id=101, ts=now - 4 * 86400, is_bot=0),   # old backlog
+        dict(base, rev_id=102, ts=now - 4 * 86400, is_bot=1),   # bot, skipped in bulk
+        dict(base, rev_id=103, ts=now - 30, is_bot=0),          # fresh
+    ], None)
+    c = Collector(s)
+    order = [c._claim(conn)["rev_id"] for _ in range(3)]
+    assert order == [103, 101, 100]  # fresh first, then backlog newest first
+    assert c._claim(conn) is None    # everything is in flight or done
+    status = conn.execute("SELECT status FROM diffs WHERE rev_id = 102").fetchone()[0]
+    assert status == "skipped"
+    for rid in order:
+        c._release(rid)

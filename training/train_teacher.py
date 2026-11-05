@@ -185,7 +185,8 @@ def main(argv=None):
         f"cut at {args.max_len} for {np.mean(np.array(lens) > args.max_len):.1%} of edits")
 
     texts, labels = train.text.tolist(), train.label.to_numpy().astype(np.float32)
-    steps_per_epoch = math.ceil(len(texts) / args.batch_size / args.accum)
+    # Whole optimiser steps per epoch; a final partial accumulation is dropped.
+    steps_per_epoch = max(1, math.ceil(len(texts) / args.batch_size) // args.accum)
     total_steps = max(1, int(steps_per_epoch * args.epochs))
     opt = torch.optim.AdamW(
         [{"params": [p for n, p in model.named_parameters() if not any(k in n for k in ("bias", "LayerNorm"))],
@@ -210,7 +211,11 @@ def main(argv=None):
     try:
         while step < total_steps:
             epoch += 1
+            micro = 0
+            opt.zero_grad(set_to_none=True)
             for bt, by, _ in batches(texts, labels, args.batch_size, True, rng):
+                if micro >= steps_per_epoch * args.accum:
+                    break
                 enc = tok(bt, truncation=True, max_length=args.max_len, padding=True,
                           return_tensors="pt").to(device)
                 target = torch.tensor(by, device=device)

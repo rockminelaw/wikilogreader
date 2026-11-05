@@ -21,13 +21,16 @@ class Settings:
     wiki: str = "enwiki"
     namespace: int = 0
 
-    # Etiquette. Every Action API request goes through one thread, one at a time,
-    # with at least this many seconds between the starts of consecutive requests,
-    # and no more than requests_per_minute in any 60-second window. Wikimedia's
-    # 2026 limit for an unauthenticated client with a proper User-Agent is 200 a
-    # minute; English Wikipedia needs about 100 a minute at normal edit rates.
+    # Etiquette. At most api_concurrency Action API requests at once (Wikimedia's
+    # rate-limit page asks for 3 or fewer), at least min_request_interval seconds
+    # between request starts, and no more than requests_per_minute in any
+    # 60-second window. Wikimedia's 2026 limit for an unauthenticated client with
+    # a proper User-Agent is 200 a minute. Set api_concurrency to 1 to make
+    # requests strictly one at a time, as the older Action API etiquette page
+    # suggests; the diff backlog then grows on busy days.
+    api_concurrency: int = 3
     min_request_interval: float = 0.25
-    requests_per_minute: int = 150
+    requests_per_minute: int = 170
     maxlag: int = 5
     # Optional personal API token from api.wikimedia.org, sent as a Bearer token.
     # It raises the rate limit for authenticated clients. Never logged.
@@ -38,7 +41,8 @@ class Settings:
     # User info and save-time tags are fetched once an edit is this old.
     enrich_delay_seconds: int = 60
 
-    fetch_bot_diffs: bool = True
+    # Bot edits are about a third of the stream and almost never reverted.
+    fetch_bot_diffs: bool = False
     max_text_chars: int = 50_000
     stats_interval_seconds: int = 300
 

@@ -141,10 +141,11 @@ Environment variables, all optional:
 |---|---|---|
 | `WRR_DB_PATH` | `data/edits.sqlite` | database file |
 | `WRR_LABEL_DELAY_HOURS` | `48` | how old an edit must be before labelling |
-| `WRR_REQUESTS_PER_MINUTE` | `150` | ceiling on Action API requests |
+| `WRR_API_CONCURRENCY` | `3` | Action API requests in flight at once; `1` for strictly one at a time |
+| `WRR_REQUESTS_PER_MINUTE` | `170` | ceiling on Action API requests |
 | `WRR_MIN_REQUEST_INTERVAL` | `0.25` | seconds between request starts |
 | `WRR_MAXLAG` | `5` | `maxlag` sent with each request |
-| `WRR_FETCH_BOT_DIFFS` | `1` | set to `0` to skip diffs for bot edits |
+| `WRR_FETCH_BOT_DIFFS` | `0` | set to `1` to fetch diffs for bot edits too |
 | `WRR_API_TOKEN` | empty | personal OAuth 2 access token for a higher rate limit |
 | `WRR_STATS_INTERVAL` | `300` | seconds between progress lines |
 
@@ -154,12 +155,19 @@ Environment variables, all optional:
   in the format the
   [User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy)
   asks for.
-- One API request at a time, from a single thread, with at most 150 a minute.
-  Wikimedia's 2026 [rate limits](https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits)
-  allow 200 a minute for an unauthenticated client with a proper User-Agent.
-  English Wikipedia gets about 1.5 article edits a second, which needs about
-  100 requests a minute: one diff per edit plus a batched request for every 50
-  edits for enrichment and another for labels.
+- At most three API requests at once and at most 170 a minute, shared by all
+  threads. Wikimedia's 2026 [rate limits](https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits)
+  allow 200 a minute for an unauthenticated client with a proper User-Agent
+  and ask for 3 or fewer concurrent requests. The older
+  [Action API etiquette](https://www.mediawiki.org/wiki/API:Etiquette) page
+  recommends one request at a time; set `WRR_API_CONCURRENCY=1` for that.
+  It was the setting until 5 November 2026, and it fell behind: each diff
+  request takes over a second from Australia, while English Wikipedia gets
+  1.5-1.9 article edits a second.
+- Diffs for edits from the last hour are fetched first, so live edits get
+  theirs within seconds; spare capacity works through older edits still
+  missing one. Bot edits (a third to a half of the stream, and almost never
+  reverted) get no diff unless `WRR_FETCH_BOT_DIFFS=1`.
 - `maxlag=5` on every request; on a lag error it waits and retries.
 - 429 and 503 responses are retried after the `Retry-After` time (at least 5 s
   without one). Network and server errors back off exponentially with jitter.

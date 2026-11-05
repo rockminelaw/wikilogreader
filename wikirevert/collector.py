@@ -1,11 +1,14 @@
 """The long-running collector.
 
-Two threads:
+Threads:
 - stream: reads EventStreams, keeps English Wikipedia main-namespace edits,
   stores them with the stream position in the same transaction.
-- api: the only thread that calls the Action API, so requests are strictly
-  one at a time. It fetches diffs as edits arrive, enriches edits in batches
-  of 50 after a minute, and labels them in batches of 50 after 48 hours.
+- api-1 .. api-N (N = api_concurrency, default 3): call the Action API. All of
+  them fetch diffs; api-1 also enriches edits in batches of 50 after a minute
+  and labels them in batches of 50 after 48 hours. Diffs for edits from the
+  last hour come first, so live edits get theirs within seconds; spare
+  capacity works down through older edits that are still missing one.
+  Bot edits are marked "skipped" in bulk unless fetch_bot_diffs is on.
 
 The main thread logs progress and handles shutdown.
 """
@@ -37,6 +40,7 @@ class Collector:
         self.stream_events = 0
         self.stream_edits = 0
         self.stream_client: StreamClient | None = None
+        self._init_claims()
 
     # ---------- stream thread ----------
 
@@ -76,21 +80,88 @@ class Collector:
                 db.insert_edits(conn, buf, client.last_event_id)
             conn.close()
 
-    # ---------- api thread ----------
+    # ---------- api threads ----------
+
+    PENDING = """
+        SELECT e.rev_id, e.old_rev_id, e.is_bot, d.attempts
+        FROM edits e LEFT JOIN diffs d ON d.rev_id = e.rev_id
+        WHERE {where}
+          AND (d.rev_id IS NULL
+               OR (d.status = 'failed' AND d.attempts < ? AND d.fetched_at < ?))
+        ORDER BY e.rev_id DESC LIMIT ?
+    """
+
+    def _init_claims(self) -> None:
+        self._claim_lock = threading.Lock()
+        self._in_flight: set[int] = set()
+        self._queue: list = []  # backlog rows, newest first
+        self._cursor: int | None = None  # backlog scan position (rev_id)
+        self._next_skip = 0.0
+        self.diffs_fetched = 0
+
+    def skip_bot_diffs(self, conn: sqlite3.Connection) -> int:
+        if self.s.fetch_bot_diffs:
+            return 0
+        conn.execute("BEGIN")
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO diffs(rev_id, status, attempts, fetched_at) "
+            "SELECT e.rev_id, 'skipped', 0, ? FROM edits e "
+            "WHERE e.is_bot = 1 AND NOT EXISTS (SELECT 1 FROM diffs d WHERE d.rev_id = e.rev_id)",
+            (time.time(),),
+        )
+        conn.execute("COMMIT")
+        return cur.rowcount
+
+    def _claim(self, conn: sqlite3.Connection):
+        """Hand out one edit that needs a diff, never the same one to two threads."""
+        retry_before = time.time() - 600
+        with self._claim_lock:
+            if time.time() >= self._next_skip:
+                n = self.skip_bot_diffs(conn)
+                if n:
+                    log.info("Marked %d bot edits as not needing a diff", n)
+                self._next_skip = time.time() + 300
+            fresh = conn.execute(
+                self.PENDING.format(where="e.ts >= ?"),
+                (int(time.time()) - 3600, DIFF_MAX_ATTEMPTS, retry_before, 50),
+            ).fetchall()
+            for row in fresh:
+                if row["rev_id"] not in self._in_flight:
+                    self._in_flight.add(row["rev_id"])
+                    return row
+            for _ in range(2):
+                while self._queue:
+                    row = self._queue.pop(0)
+                    if row["rev_id"] not in self._in_flight:
+                        self._in_flight.add(row["rev_id"])
+                        return row
+                where, args = ("e.rev_id < ?", (self._cursor,)) if self._cursor else ("1 = 1", ())
+                self._queue = conn.execute(
+                    self.PENDING.format(where=where),
+                    (*args, DIFF_MAX_ATTEMPTS, retry_before, 200),
+                ).fetchall()
+                if self._queue:
+                    self._cursor = self._queue[-1]["rev_id"]
+                elif self._cursor is not None:
+                    self._cursor = None  # reached the oldest edit; start a new sweep
+                else:
+                    return None
+            return None
+
+    def _release(self, rev_id: int) -> None:
+        with self._claim_lock:
+            self._in_flight.discard(rev_id)
 
     def diff_step(self, conn: sqlite3.Connection) -> int:
-        row = conn.execute(
-            """
-            SELECT e.rev_id, e.old_rev_id, e.is_bot, d.attempts
-            FROM edits e LEFT JOIN diffs d ON d.rev_id = e.rev_id
-            WHERE d.rev_id IS NULL
-               OR (d.status = 'failed' AND d.attempts < ? AND d.fetched_at < ?)
-            ORDER BY e.rev_id LIMIT 1
-            """,
-            (DIFF_MAX_ATTEMPTS, time.time() - 600),
-        ).fetchone()
+        row = self._claim(conn)
         if row is None:
             return 0
+        try:
+            return self._fetch_one(conn, row)
+        finally:
+            self._release(row["rev_id"])
+
+    def _fetch_one(self, conn: sqlite3.Connection, row) -> int:
         rid, attempts = row["rev_id"], (row["attempts"] or 0) + 1
         if not row["old_rev_id"] or (row["is_bot"] and not self.s.fetch_bot_diffs):
             self._save_diff(conn, {"rev_id": rid, "status": "skipped", "attempts": attempts})
@@ -113,6 +184,7 @@ class Collector:
         out = diffs.to_row(rid, result, time.time(), self.s.max_text_chars)
         out["attempts"] = attempts
         self._save_diff(conn, out, page_id=result.page_id)
+        self.diffs_fetched += 1
         return 1
 
     def _save_diff(self, conn: sqlite3.Connection, row: dict, page_id: int | None = None) -> None:
@@ -127,7 +199,7 @@ class Collector:
             conn.execute("UPDATE edits SET page_id = ? WHERE rev_id = ?", (page_id, row["rev_id"]))
         conn.execute("COMMIT")
 
-    def run_api(self) -> None:
+    def run_api(self, batches: bool = True) -> None:
         conn = db.connect(self.s.db_path)
         next_enrich = next_label = 0.0
         try:
@@ -135,14 +207,14 @@ class Collector:
                 worked = 0
                 try:
                     now = time.time()
-                    if now >= next_enrich:
+                    if batches and now >= next_enrich:
                         n = self._guard_batch(
                             conn, lambda: enrich.run_batch(conn, self.api, self.s.enrich_delay_seconds),
                             on_api_error=self._skip_enrich,
                         )
                         worked += n
                         next_enrich = now + (10 if n >= enrich.BATCH else 30)
-                    if now >= next_label:
+                    if batches and now >= next_label:
                         n = self._guard_batch(
                             conn, lambda: labels.run_batch(conn, self.api, self.s.label_delay_hours),
                             on_api_error=self._fail_labels,
@@ -198,10 +270,10 @@ class Collector:
         signal.signal(signal.SIGTERM, handle)
         signal.signal(signal.SIGINT, handle)
 
-        threads = [
-            threading.Thread(target=self.run_stream, name="stream", daemon=True),
-            threading.Thread(target=self.run_api, name="api", daemon=True),
-        ]
+        threads = [threading.Thread(target=self.run_stream, name="stream", daemon=True)]
+        for i in range(max(1, self.s.api_concurrency)):
+            threads.append(threading.Thread(
+                target=self.run_api, kwargs={"batches": i == 0}, name=f"api-{i + 1}", daemon=True))
         for t in threads:
             t.start()
         next_stats = time.time() + 60
@@ -221,9 +293,9 @@ class Collector:
         c = self.stream_client
         log.info(
             "edits=%d diffs_pending=%d enrich_pending=%d labelled=%d reverted=%d "
-            "api_requests=%d http_429=%d stream_reconnects=%d last_edit_age=%ss",
+            "api_requests=%d diffs_fetched=%d http_429=%d stream_reconnects=%d last_edit_age=%ss",
             st["edits"], st["diffs_pending"], st["enrich_pending"], st["labelled"],
-            st["reverted"], self.api.requests_made, self.api.rate_limited,
+            st["reverted"], self.api.requests_made, self.diffs_fetched, self.api.rate_limited,
             c.disconnects if c else 0, st["last_edit_age"],
         )
 

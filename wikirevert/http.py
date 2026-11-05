@@ -1,7 +1,9 @@
 """Polite client for the MediaWiki Action API.
 
 - Descriptive User-Agent with contact details (Wikimedia User-Agent policy).
-- One request at a time with a minimum gap between requests (API:Etiquette).
+- At most `api_concurrency` requests in flight (default 3, the most the
+  Wikimedia rate-limit page allows), a minimum gap between request starts, and
+  a per-minute ceiling shared by every thread. A 429 pauses all threads.
 - maxlag on every request; a lagged response waits and retries.
 - 429 and 503 honour Retry-After; other server and network errors back off
   exponentially with jitter.
@@ -46,22 +48,51 @@ class ApiClient:
         max_attempts: int = 6,
     ):
         self.settings = settings
-        self.session = session or requests.Session()
-        self.session.headers["User-Agent"] = settings.user_agent
-        self.session.headers["Accept-Encoding"] = "gzip"
-        if settings.api_token:
-            self.session.headers["Authorization"] = f"Bearer {settings.api_token}"
+        # An injected session (tests) is shared; otherwise each thread gets its own.
+        self._shared_session = session
+        self._local = threading.local()
+        if session is not None:
+            self._prepare(session)
         self._sleep = sleep
         self._clock = clock
-        self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(max(1, settings.api_concurrency))
+        self._rate_lock = threading.Lock()
+        self._pause_until = -1e9
         self._last_start = -1e9
         self._window: deque[float] = deque()
         self.rate_limited = 0  # count of 429 responses, for the stats log
         self.max_attempts = max_attempts
         self.requests_made = 0
 
+    def _prepare(self, session: requests.Session) -> requests.Session:
+        session.headers["User-Agent"] = self.settings.user_agent
+        session.headers["Accept-Encoding"] = "gzip"
+        if self.settings.api_token:
+            session.headers["Authorization"] = f"Bearer {self.settings.api_token}"
+        return session
+
+    @property
+    def session(self) -> requests.Session:
+        if self._shared_session is not None:
+            return self._shared_session
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = self._local.session = self._prepare(requests.Session())
+        return sess
+
+    def _pause_all(self, seconds: float) -> None:
+        with self._rate_lock:
+            self._pause_until = max(self._pause_until, self._clock() + seconds)
+
     def _wait_turn(self) -> None:
+        with self._rate_lock:
+            self._wait_turn_locked()
+
+    def _wait_turn_locked(self) -> None:
         now = self._clock()
+        if self._pause_until > now:
+            self._sleep(self._pause_until - now)
+            now = self._clock()
         gap = self.settings.min_request_interval - (now - self._last_start)
         if gap > 0:
             self._sleep(gap)
@@ -85,7 +116,7 @@ class ApiClient:
             **params,
         }
         backoff = 2.0
-        with self._lock:  # never more than one request in flight
+        with self._slots:  # at most api_concurrency requests in flight
             for attempt in range(1, self.max_attempts + 1):
                 self._wait_turn()
                 self.requests_made += 1
@@ -103,7 +134,7 @@ class ApiClient:
                     # Rate-limit page: without Retry-After, wait at least 5 s.
                     wait = _retry_after(resp, default=max(5.0, backoff))
                     log.warning("API returned %d, waiting %.0fs", resp.status_code, wait)
-                    self._sleep(wait)
+                    self._pause_all(wait)
                     backoff = min(backoff * 2, 300)
                     continue
                 if resp.status_code >= 500:
@@ -128,7 +159,7 @@ class ApiClient:
                     if code == "maxlag":
                         wait = _retry_after(resp, default=5.0)
                         log.info("Replication lag high, waiting %.0fs", wait)
-                        self._sleep(wait)
+                        self._pause_all(wait)
                         continue
                     if code in ("ratelimited", "internal_api_error_DBQueryError"):
                         self._sleep(_jitter(backoff))
