@@ -58,7 +58,7 @@ def keep_awake(on: bool) -> None:
 def load_splits(args, log):
     from training.data import add_text, make_split
 
-    cache = os.path.join(args.cache, f"splits-maxchars{args.diff_chars}")
+    cache = os.path.join(args.cache, f"splits-{args.split}-maxchars{args.diff_chars}")
     paths = {s: os.path.join(cache, f"{s}.parquet") for s in ("train", "val", "test")}
     if all(os.path.exists(p) for p in paths.values()):
         log(f"Loading cached splits from {cache}")
@@ -66,7 +66,7 @@ def load_splits(args, log):
     log(f"Building splits from {args.exports} (a few minutes the first time)")
     os.makedirs(cache, exist_ok=True)
     out = []
-    for name, df in zip(("train", "val", "test"), make_split(args.exports)):
+    for name, df in zip(("train", "val", "test"), make_split(args.exports, args.split)):
         df = add_text(df, args.diff_chars)[["rev_id", "day", "page", "label", "text"]]
         df.to_parquet(paths[name])
         out.append(df)
@@ -130,6 +130,9 @@ def main(argv=None):
     p.add_argument("--exports", required=True, help="folder with edits-YYYY-MM-DD files")
     p.add_argument("--out", required=True, help="folder for this run")
     p.add_argument("--cache", default=None, help="where to keep built splits (default: next to --out)")
+    p.add_argument("--split", default="v2", help="which split in training/data.py (v1 or v2)")
+    p.add_argument("--score-train", action="store_true",
+                   help="also save the best model's logits on the training set (for distillation)")
     p.add_argument("--model", default="microsoft/deberta-v3-base")
     p.add_argument("--max-len", type=int, default=256)
     p.add_argument("--diff-chars", type=int, default=1400)
@@ -272,16 +275,24 @@ def main(argv=None):
     log(summary_line("test, temperature", cal_t))
     log(summary_line("test, Platt", cal))
 
+    parts = [
+        pd.DataFrame({"rev_id": val.rev_id, "split": "val", "label": val.label, "logit": vlog}),
+        pd.DataFrame({"rev_id": test.rev_id, "split": "test", "label": test.label, "logit": tlog}),
+    ]
+    pd.concat(parts).to_parquet(os.path.join(args.out, "predictions.parquet"))
+    if args.score_train:
+        log("Scoring the training set for distillation")
+        model.to(device)
+        trlog = predict(model, tok, train.text.tolist(), args, device, dtype)
+        parts.append(pd.DataFrame({"rev_id": train.rev_id, "split": "train", "label": train.label,
+                                   "logit": trlog}))
+        pd.concat(parts).to_parquet(os.path.join(args.out, "predictions.parquet"))
     lat = {"gpu" if device.type == "cuda" else "cpu": latency(model, tok, test.text.tolist(), args, device, 200)}
     if device.type == "cuda":
         torch.set_num_threads(os.cpu_count() or 4)
         lat["cpu"] = latency(model.to("cpu").float(), tok, test.text.tolist(), args, torch.device("cpu"), 40)
     log("Latency per edit (batch of 1, tokenising included):", json.dumps(lat))
 
-    pd.concat([
-        pd.DataFrame({"rev_id": val.rev_id, "split": "val", "label": val.label, "logit": vlog}),
-        pd.DataFrame({"rev_id": test.rev_id, "split": "test", "label": test.label, "logit": tlog}),
-    ]).to_parquet(os.path.join(args.out, "predictions.parquet"))
     with open(os.path.join(args.out, "metrics.json"), "w") as f:
         json.dump({"args": vars(args), "temperature": temp, "platt": [a, b], "test_raw": raw,
                    "test_temperature": cal_t, "test_calibrated": cal,

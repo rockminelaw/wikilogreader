@@ -167,10 +167,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--exports", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--split", default="v2")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
 
-    tr, va, te = make_split(args.exports)
+    tr, va, te = make_split(args.exports, args.split)
     print(f"train {len(tr)}, val {len(va)}, test {len(te)}", flush=True)
     preds, metrics = [], {}
 

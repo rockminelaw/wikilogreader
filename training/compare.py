@@ -120,7 +120,7 @@ def _style(ax):
     ax.set_axisbelow(True)
 
 
-def charts(df: pd.DataFrame, models, out: str) -> list[str]:
+def charts(df: pd.DataFrame, models, out: str, title: str) -> list[str]:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -144,7 +144,7 @@ def charts(df: pd.DataFrame, models, out: str) -> list[str]:
     ax.set_ylabel("Precision (share of flags that were reverted)")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.02)
-    ax.set_title("Precision and recall on the test day, 29 October 2026", loc="left", fontsize=11, color=INK)
+    ax.set_title(title, loc="left", fontsize=11, color=INK)
     ax.legend(title="Model (PR-AUC)", fontsize=8, title_fontsize=8, frameon=False, loc="upper right")
     fig.tight_layout()
     files.append(os.path.join(out, "pr_curves.png"))
@@ -169,7 +169,7 @@ def charts(df: pd.DataFrame, models, out: str) -> list[str]:
     ax.set_ylabel("Share actually reverted")
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_title("Calibration on the test day: edits grouped by score percentile",
+    ax.set_title("Calibration: edits grouped by score percentile",
                  loc="left", fontsize=11, color=INK)
     ax.text(0.0, -0.16, "Groups: bottom 50%, 50-80th, 80-90th, 90-95th, 95-98th, 98-99th, 99-99.5th "
             "percentile, top 0.5%", transform=ax.transAxes, fontsize=7.5, color=INK2)
@@ -189,10 +189,12 @@ def main(argv=None):
     ap.add_argument("--liftwing", default=None, help="language-agnostic scores (JSON lines)")
     ap.add_argument("--liftwing-ml", default=None, help="multilingual scores for anonymous edits")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--split", default="v2")
+    ap.add_argument("--title", default="Precision and recall on the test days")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
 
-    _, _, test = make_split(args.exports, with_text=False)
+    _, _, test = make_split(args.exports, args.split, with_text=False)
     df = load_scores(args, test)
     models = [m for m in ORDER if m in df.columns]
     result = {"n_test": len(df), "positives": int(df.label.sum())}
@@ -233,7 +235,7 @@ def main(argv=None):
             "pr_auc_registered": float(average_precision_score(d[d.is_anon == 0].label, d[d.is_anon == 0][m])),
         }
     result["slices"] = slices
-    result["charts"] = charts(df_chart, models, args.out)
+    result["charts"] = [os.path.basename(f) for f in charts(df_chart, models, args.out, args.title)]
     with open(os.path.join(args.out, "comparison.json"), "w") as f:
         json.dump(result, f, indent=2)
     print(json.dumps({k: v for k, v in result.items()

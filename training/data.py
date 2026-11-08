@@ -33,7 +33,9 @@ META_COLUMNS = [
     "lines_added", "lines_removed", "lines_changed", "moved_paras",
     "label_status", "reverted", "reverted_48h", "revert_seconds", "reverter_is_self",
 ]
-TEXT_COLUMNS = ["added_text", "removed_text", "added_lines", "removed_lines"]
+# The model input (edit_text) and the baselines only read these two. The full
+# changed lines are in the export too, but loading them doubles the memory.
+TEXT_COLUMNS = ["added_text", "removed_text"]
 
 
 @dataclass(frozen=True)
@@ -43,21 +45,39 @@ class Split:
     test_days: tuple[str, ...]
 
 
-# First split, while the collector's diff backlog for 30 October onwards
-# catches up. Later splits will use whole later weeks as the test set.
+# v1: the first split, while the collector's diff backlog caught up. Its test
+# set is the first 16 hours of 29 October (the part with diffs).
 SPLIT_V1 = Split(
     train_days=("2026-10-25", "2026-10-26", "2026-10-27"),
     val_days=("2026-10-28",),
     test_days=("2026-10-29",),
 )
+# v2: eight days of training, then three whole days of test that come after
+# everything the models saw. 29 and 30 October are about two-thirds covered
+# (the rest were still waiting for diffs at export), which only means less
+# training data from those days.
+SPLIT_V2 = Split(
+    train_days=("2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28",
+                "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01"),
+    val_days=("2026-11-02",),
+    test_days=("2026-11-03", "2026-11-04", "2026-11-05"),
+)
+SPLITS = {"v1": SPLIT_V1, "v2": SPLIT_V2}
 
 
-def read_day(path: str, with_text: bool = True) -> pd.DataFrame:
+def read_day(path: str, with_text: bool = True, bots: bool = False) -> pd.DataFrame:
+    """One day's export. Bot edits are dropped while reading unless bots=True,
+    which keeps memory down: they are a third to a half of all rows."""
     cols = META_COLUMNS + (TEXT_COLUMNS if with_text else [])
     if path.endswith(".parquet"):
-        return pd.read_parquet(path, columns=cols)
+        df = pd.read_parquet(path, columns=cols)
+        return df if bots else df[df.is_bot == 0].reset_index(drop=True)
+    rows = []
     with gzip.open(path, "rt", encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f]
+        for line in f:
+            rec = json.loads(line)
+            if bots or not rec.get("is_bot"):
+                rows.append({c: rec.get(c) for c in cols})
     return pd.DataFrame.from_records(rows, columns=cols)
 
 
@@ -66,16 +86,21 @@ def day_of(name: str) -> str:
     return name.split("edits-", 1)[1][:10]
 
 
-def load_days(export_dir: str, days, with_text: bool = True) -> pd.DataFrame:
+def load_days(export_dir: str, days, with_text: bool = True, bots: bool = False,
+              each=None) -> pd.DataFrame:
+    """Load the given days, applying `each` (e.g. clean) to every day before
+    combining them, so only the rows that are kept are held in memory."""
     wanted = set(days)
-    frames = []
+    frames, found = [], set()
     for name in sorted(os.listdir(export_dir)):
         if not name.startswith("edits-") or day_of(name) not in wanted:
             continue
         if not (name.endswith(".jsonl.gz") or name.endswith(".parquet")):
             continue
-        frames.append(read_day(os.path.join(export_dir, name), with_text).assign(day=day_of(name)))
-    missing = wanted - {f["day"].iat[0] for f in frames if len(f)}
+        df = read_day(os.path.join(export_dir, name), with_text, bots).assign(day=day_of(name))
+        found.add(day_of(name))
+        frames.append(each(df) if each else df)
+    missing = wanted - found
     if missing:
         raise FileNotFoundError(f"no export files for {sorted(missing)} in {export_dir}")
     return pd.concat(frames, ignore_index=True)
@@ -89,12 +114,14 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def make_split(export_dir: str, split: Split = SPLIT_V1, with_text: bool = True):
+def make_split(export_dir: str, split: Split | str = "v2", with_text: bool = True):
     """Return train, val, test. No page appears in more than one of them: a
     page seen later is removed from the earlier sets, so the test set stays
     an untouched slice of the live stream."""
+    if isinstance(split, str):
+        split = SPLITS[split]
     days = split.train_days + split.val_days + split.test_days
-    df = clean(load_days(export_dir, days, with_text))
+    df = load_days(export_dir, days, with_text, each=clean)
     test = df[df.day.isin(split.test_days)]
     val = df[df.day.isin(split.val_days) & ~df.page.isin(set(test.page))]
     later = set(test.page) | set(val.page)

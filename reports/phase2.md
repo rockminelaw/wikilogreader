@@ -258,12 +258,12 @@ needed for both.
 ## Reproducing
 
 ```
-python -m training.train_teacher --exports EXPORTS --out runs/teacher-v1      # GPU
-python -m training.baselines     --exports EXPORTS --out runs/baselines-v1
+python -m training.train_teacher --split v1 --exports EXPORTS --out runs/teacher-v1      # GPU
+python -m training.baselines     --split v1 --exports EXPORTS --out runs/baselines-v1
 python -m training.liftwing      --rev-ids test_rev_ids.parquet --out runs/liftwing-test.jsonl
 python -m training.liftwing      --rev-ids test_anon_rev_ids.parquet --out runs/liftwing-ml-anon.jsonl \
                                  --model revertrisk-multilingual --rate 5
-python -m training.compare       --exports EXPORTS --teacher runs/teacher-v1 --baselines runs/baselines-v1 \
+python -m training.compare       --split v1 --exports EXPORTS --teacher runs/teacher-v1 --baselines runs/baselines-v1 \
                                  --liftwing runs/liftwing-test.jsonl --liftwing-ml runs/liftwing-ml-anon.jsonl \
-                                 --out reports/phase2
+                                 --title "Precision and recall on the test day, 29 October 2026" --out reports/phase2
 ```

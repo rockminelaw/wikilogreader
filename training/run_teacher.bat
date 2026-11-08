@@ -6,5 +6,5 @@ setlocal
 set PYTHONUTF8=1
 set HF_HOME=%~dp0..\..\hf-cache
 cd /d "%~dp0.."
-python -m training.train_teacher --exports ..\wiki-export --out ..\runs\teacher-v1 %*
+python -m training.train_teacher --split v1 --exports ..\wiki-export --out ..\runs\teacher-v1 %*
 endlocal
