@@ -69,6 +69,29 @@ def load_scores(args, test: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def token_counts(args) -> pd.DataFrame:
+    """Token counts of the teacher's input for the test days, to see how
+    cutting long edits hurts. Every cleaned test-day edit is in the test set
+    (the page-disjoint rule only removes rows from earlier sets), so only the
+    test days' text needs loading."""
+    from transformers import AutoTokenizer
+
+    from training.data import SPLITS, clean, edit_text, load_days
+
+    tok = AutoTokenizer.from_pretrained(args.tokenizer)
+    out = []
+    for day in SPLITS[args.split].test_days:
+        d = load_days(args.exports, [day], with_text=True, each=clean)
+        recs = d.to_dict("records")
+        for i in range(0, len(recs), 5000):
+            chunk = recs[i:i + 5000]
+            ids = tok([edit_text(r, args.diff_chars) for r in chunk])["input_ids"]
+            out.append(pd.DataFrame({"rev_id": [r["rev_id"] for r in chunk],
+                                     "n_tokens": [len(x) for x in ids]}))
+        del d, recs
+    return pd.concat(out, ignore_index=True)
+
+
 def bootstrap(y, p, n=1000, seed=0):
     rng = np.random.default_rng(seed)
     out = {"pr_auc": [], "p2": [], "r2": [], "brier": []}
@@ -191,11 +214,18 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--split", default="v2")
     ap.add_argument("--title", default="Precision and recall on the test days")
+    ap.add_argument("--tokenizer", default=None,
+                    help="tokenizer of the teacher, to slice by input length (e.g. microsoft/deberta-v3-base)")
+    ap.add_argument("--max-len", type=int, default=256, help="the teacher's token limit")
+    ap.add_argument("--diff-chars", type=int, default=1400)
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
 
     _, _, test = make_split(args.exports, args.split, with_text=False)
     df = load_scores(args, test)
+    df = df.merge(test[["rev_id", "day", "user_editcount"]], on="rev_id", how="left")
+    if args.tokenizer:
+        df = df.merge(token_counts(args), on="rev_id", how="left")
     models = [m for m in ORDER if m in df.columns]
     result = {"n_test": len(df), "positives": int(df.label.sum())}
 
@@ -235,6 +265,50 @@ def main(argv=None):
             "pr_auc_registered": float(average_precision_score(d[d.is_anon == 0].label, d[d.is_anon == 0][m])),
         }
     result["slices"] = slices
+    if lw_cols:
+        result["teacher_minus_liftwing_mix_pr_auc"] = paired_diff(
+            both.label.to_numpy(), both.teacher.to_numpy(), both.liftwing_mix.to_numpy())
+        if "liftwing_ml" in anon:
+            ya = anon.label.to_numpy()
+            result["anon_teacher_minus_multilingual_pr_auc"] = paired_diff(
+                ya, anon.teacher.to_numpy(), anon.liftwing_ml.to_numpy())
+            result["anon_multilingual_minus_gbdt_pr_auc"] = paired_diff(
+                ya, anon.liftwing_ml.to_numpy(), anon.gbdt_meta_diffstats.to_numpy())
+
+    # Each test day on its own, to see how much results move from day to day.
+    pair = ["teacher", "gbdt_meta_diffstats"]
+    result["per_day"] = [
+        {"day": day, "edits": int(len(d)), "reverted": float(d.label.mean()),
+         **{f"{m}_{k}": v for m in pair for k, v in (
+             ("pr_auc", float(average_precision_score(d.label, d[m]))),
+             ("p_at_2", at_alert_rate(d.label.to_numpy(), d[m].to_numpy(), 0.02)["precision"]))}}
+        for day, d in df.groupby("day")
+    ]
+
+    # Where the models fall short, over the whole test set.
+    groups = {
+        "anonymous": df.is_anon == 1,
+        "registered, under 100 edits": (df.is_anon == 0) & (df.user_editcount.fillna(0) < 100),
+        "registered, 100+ edits": (df.is_anon == 0) & (df.user_editcount.fillna(0) >= 100),
+    }
+    if "n_tokens" in df:
+        groups[f"cut at {args.max_len} tokens"] = df.n_tokens > args.max_len
+        groups[f"fits in {args.max_len} tokens"] = df.n_tokens <= args.max_len
+    n = max(1, int(round(len(df) * 0.02)))
+    flags = {m: df.nlargest(n, m).index for m in pair}
+    result["where_short"] = []
+    for g, mask in groups.items():
+        d = df[mask]
+        row = {"slice": g, "edits": int(len(d)), "reverted": float(d.label.mean()),
+               "share_of_reverts": float(d.label.sum() / df.label.sum())}
+        for m in pair:
+            row[f"{m}_pr_auc"] = float(average_precision_score(d.label, d[m]))
+            f = df.loc[flags[m]]
+            fm = f[mask.loc[flags[m]]]
+            row[f"{m}_share_of_flags"] = float(len(fm) / n)
+            row[f"{m}_flag_precision"] = float(fm.label.mean()) if len(fm) else None
+            row[f"{m}_recall_at_2"] = float(fm.label.sum() / max(1, d.label.sum()))
+        result["where_short"].append(row)
     result["charts"] = [os.path.basename(f) for f in charts(df_chart, models, args.out, args.title)]
     with open(os.path.join(args.out, "comparison.json"), "w") as f:
         json.dump(result, f, indent=2)
