@@ -23,18 +23,19 @@ phase 2, 3 to 5 November 2026 (247,471 edits, 5.7% reverted).
   PyTorch original, and the browser's scores match Python's to within 0.07 on
   the logit scale.
 - **Speed in the browser** (one WebAssembly thread on a 2-core server CPU):
-  BERT-tiny takes 4.8 ms per edit (median) and stays under 50 ms on every
-  edit measured. BERT-mini takes 24 ms, but long edits take about 59 ms, over
+  BERT-tiny takes 4.8 ms per edit (median), and 25 ms at the 99th
+  percentile. BERT-mini takes 24 ms, but long edits take about 59 ms, over
   the budget. Cutting BERT-mini's input from 256 to 128 tokens brings even
-  its slowest 1% of edits under 40 ms, at a cost of TBD128 PR-AUC.
+  its slowest 1% of edits under 40 ms, and lowers its PR-AUC from 0.562 to
+  0.551. That is still 0.055 above the tree.
 - **Where the students fall short** is spelled out in its own section below.
   The main points:
   - BERT-mini loses a fifth of the teacher's correct top-2% flags; BERT-tiny
     loses almost a third.
   - The gap is widest on anonymous edits, where most reverts are.
   - On long edits, BERT-tiny is worse than the tree.
-  - Like every model so far, the students do little better than chance on
-    experienced editors' edits.
+  - Like every model so far, the students rank experienced editors' edits
+    poorly (PR-AUC 0.08, against a base rate of 1.3%).
 
 ## What I built
 
@@ -62,8 +63,8 @@ phase 2, 3 to 5 November 2026 (247,471 edits, 5.7% reverted).
   - The teacher's score is softened (temperature 2) so the student also learns
     from how sure the teacher was, not only which side it came down on.
   - The teacher's scores on the training edits come from the teacher itself,
-    trained on those edits, so they are more confident than its scores on new
-    edits would be.
+    trained on those edits, so they may be more confident than its scores on
+    new edits would be.
 - **Without the teacher:** BERT-tiny and BERT-mini were also trained on the
   labels alone, with everything else the same, to measure what the teacher
   adds.
@@ -96,14 +97,14 @@ phase 2, 3 to 5 November 2026 (247,471 edits, 5.7% reverted).
 
 ### Quality
 
-Every model scored on all 247,471 test edits. Student scores are from the
+Every model was scored on all 247,471 test edits. Student scores are from the
 int8 ONNX files, which is what the browser runs. Square brackets are 95%
 bootstrap intervals over edits (1,000 resamples).
 
 | Model | int8 size | PR-AUC | Precision at top 2% | Recall at top 2% | Recall at top 5% | ROC-AUC | Brier |
 |---|---|---|---|---|---|---|---|
 | Teacher (DeBERTa-v3-base) | 738 MB (float32) | 0.589 [0.580-0.597] | 0.85 [0.84-0.86] | 0.30 | 0.51 | 0.917 | 0.0342 |
-| BERT-mini student | 11.4 MB | 0.562 [0.554-0.571] | 0.81 [0.80-0.82] | 0.28 | 0.50 | 0.914 | 0.0355 |
+| BERT-mini student | 11.4 MB | 0.562 [0.554-0.571] | 0.81 [0.80-0.82] | 0.28 | 0.49 | 0.914 | 0.0355 |
 | ELECTRA-small student | 14.1 MB | 0.561 [0.552-0.569] | 0.81 [0.79-0.82] | 0.28 | 0.49 | 0.914 | 0.0356 |
 | BERT-tiny student | 4.5 MB | 0.520 [0.511-0.528] | 0.74 [0.72-0.75] | 0.26 | 0.47 | 0.910 | 0.0375 |
 | GBDT, metadata + diff statistics (phase 2) | | 0.496 [0.487-0.505] | 0.70 [0.69-0.71] | 0.25 | 0.46 | 0.909 | 0.0381 |
@@ -131,9 +132,9 @@ bootstrap intervals over edits (1,000 resamples).
   0.04 BERT-mini gains over BERT-tiny from being two and a half times bigger.
 - **Without the teacher, the students overfit.** Both were barely better on
   validation after the second epoch than after the first, and got worse in
-  the third, so their second-epoch checkpoints are used. The
-  distilled students were still improving at the end of the third epoch, so
-  longer training might help them. I haven't tested it.
+  the third, so their second-epoch checkpoints are used. The distilled
+  students were still improving at the end of the third epoch, so longer
+  training might help them. I haven't tested it.
 - **ELECTRA-small:** 12 layers instead of 4, and no better than BERT-mini on
   any measure here.
 
@@ -196,14 +197,14 @@ edits scored one at a time, tokenising included. "Full-length edits" are the
 - **Time grows with length:** the 500 edits average 138 tokens, and
   full-length edits take two and a half times as long as the median edit.
 - **Against the 50 ms budget:**
-  - **BERT-tiny** is under it on every edit measured.
+  - **BERT-tiny** is under it even at the 99th percentile (25 ms).
   - **BERT-mini** is under it on a typical edit but over it on most long
     ones, which are one edit in seven.
   - **ELECTRA-small** is over it on a typical edit.
 - **What this means for the demo:** English Wikipedia's stream averages about
   one non-bot edit per second (963,000 in the 12 days collected), so even
-  ELECTRA-small would keep up. The budget is
-  about keeping a visitor's laptop responsive, not about throughput.
+  ELECTRA-small would keep up. The budget is about keeping a visitor's laptop
+  responsive, not about throughput.
 
 ![PR-AUC against download size and browser time, with the 15 MB and 50 ms limits](phase3/tradeoff.png)
 
@@ -216,13 +217,24 @@ the edits longer than the cut are affected.
 | BERT-mini input | PR-AUC | Median | 90th percentile | 99th percentile | Edits at the cut |
 |---|---|---|---|---|---|
 | 256 tokens (trained length) | 0.562 | 24.0 ms | 58.4 ms | 85.8 ms | 14% |
-| 192 tokens | TBD192 | 22.2 ms | 42.5 ms | 64.5 ms | 21% |
-| 128 tokens | TBD128 | 20.9 ms | 28.0 ms | 38.4 ms | 40% |
+| 192 tokens | 0.559 | 22.2 ms | 42.5 ms | 64.5 ms | 21% |
+| 128 tokens | 0.551 | 20.9 ms | 28.0 ms | 38.4 ms | 40% |
 
-PR-AUC is calibrated on the validation day at the same length. Timings come
-from separate browser runs, so differences of 10% are within run-to-run noise.
+- **Quality:** PR-AUC is on all test edits. The scores are calibrated on the
+  validation day at the same length.
+- **Timings and "edits at the cut":** from the same 500 edits as above, in
+  separate browser runs, so differences of 10% are within run-to-run noise.
 
-TBDCUT
+- **At 128 tokens:** BERT-mini is under 50 ms even at the 99th percentile
+  (38 ms), and loses 0.011 PR-AUC.
+  - Precision at the top 2% falls from 0.81 to 0.79.
+  - It is still 0.031 above BERT-tiny and 0.055 above the tree.
+  - I didn't compute intervals for these differences.
+- **At 192 tokens:** it loses only 0.004, but its slowest edits (99th
+  percentile 64.5 ms) are still over the budget.
+- **What is lost:** the cut drops the end of the diff on about two edits in
+  five. Training at 128 tokens might recover some of the loss. I haven't
+  tried it.
 
 ### Do int8 and the browser change the scores?
 
@@ -264,8 +276,8 @@ places.
 
 ## Where the small models fall short
 
-The students are better than anything else that fits in a browser, but they
-are not the teacher.
+The students beat every other model I've tried that would fit in a browser,
+but they are not the teacher.
 
 **They miss many of the teacher's correct flags.** Of the 4,214 edits the
 teacher ranks in its top 2% that were then reverted:
@@ -292,10 +304,11 @@ alert rate:
 - **Anonymous edits:** BERT-tiny is 0.09 behind the teacher here, against
   0.07 overall.
 - **Note:** the anonymous figures are on all 35,036 anonymous test edits.
-  Phase 2's 0.703 for the teacher was on its 25,000-edit sample.
-- **Experienced editors:** no model is useful on them, and the students
-  don't change that. Their edits are three-quarters of the stream and 18% of
-  reverts.
+  Phase 2's 0.703 for the teacher was on the anonymous edits in its
+  25,000-edit sample.
+- **Experienced editors:** every model ranks them poorly (PR-AUC about 0.08
+  against a base rate of 1.3%), and the students don't change that. Their
+  edits are three-quarters of the stream and 18% of reverts.
 
 **Long edits: BERT-tiny is worse than the tree.** PR-AUC by input length:
 
@@ -320,7 +333,8 @@ alert rate:
 - **Text the students can't read.** The students' vocabulary turns some
   characters (many non-Latin scripts and symbols) into an "unknown" token.
   - Only 1.4% of test edits have any unknown tokens.
-  - On those, the students are no further behind the teacher than elsewhere.
+  - On those, the students are about as far behind the teacher as elsewhere
+    (these groups are small: 2,915 and 428 edits).
 - **The missed flags.** The teacher's correct flags that the students miss
   look like the ones they keep:
   - a similar share of anonymous editors (74% missed against 76% kept, for
@@ -333,10 +347,10 @@ alert rate:
 
 **Other limits:**
 
-- **Speed is measured on one machine,** a 2-core cloud server, not a laptop
-  or a phone. A phone would probably be slower. I haven't measured one.
+- **Speed is measured on one machine,** a 2-core cloud server. I haven't
+  measured a laptop or a phone.
 - **Speed and accuracy pull against each other for BERT-mini.** Fitting it
-  under 50 ms on long edits means cutting its input, which costs TBD128
+  under 50 ms on long edits means cutting its input, which costs 0.011
   PR-AUC.
 - **The download is bigger than the model.** The runtime adds 3.7 MB
   compressed, or 14.2 MB if the host doesn't compress it.
@@ -345,7 +359,23 @@ alert rate:
 
 ## For phase 4
 
-TBDCHOICE
+Two students meet both limits on this machine:
+
+| | BERT-mini, input cut to 128 tokens | BERT-tiny |
+|---|---|---|
+| PR-AUC | 0.551 | 0.520 |
+| Precision at top 2% | 0.79 | 0.74 |
+| Model download (int8) | 11.4 MB | 4.5 MB |
+| First visit, all gzipped | 12.0 MB | 7.1 MB |
+| Median / 99th percentile per edit | 20.9 / 38.4 ms | 4.8 / 25.2 ms |
+
+- **BERT-mini at 128 tokens:** the better model. Its slowest edits have the
+  least room to spare.
+- **BERT-tiny:** has more speed in reserve for slower laptops and phones, and
+  is the smaller download.
+
+Before the demo is built, I'd want to time both on a real mid-range laptop
+and a phone, using `web/bench.html`.
 
 ## Reproducing
 
@@ -370,7 +400,8 @@ node web/test-tokeniser.mjs web-models/mini/vocab.txt cases.jsonl
 python -m training.compare_students --exports EXPORTS --teacher runs/teacher-v2-256 --baselines runs/baselines-v2 \
        --student tiny=web-models/tiny --student tiny_hard=web-models/tiny-hard --student mini=web-models/mini \
        --student mini_hard=web-models/mini-hard --student electra=web-models/electra \
-       --bench tiny=reports/phase3/bench-tiny.json ... --out reports/phase3
+       --bench tiny=reports/phase3/bench-tiny.json ... \
+       --cut mini=128=reports/phase3/shorter-inputs-mini.json=reports/phase3/bench-mini-128.json --out reports/phase3
 python -m training.student_gaps --splits runs/cache/splits-v2-maxchars1400-student --teacher runs/teacher-v2-256 \
        --baselines runs/baselines-v2 --exports EXPORTS --student tiny=web-models/tiny --student mini=web-models/mini \
        --out reports/phase3/gaps.json
