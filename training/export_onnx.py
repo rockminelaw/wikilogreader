@@ -90,6 +90,7 @@ def main(argv=None):
     ap.add_argument("--splits", required=True, help="cached student splits folder (val.parquet, test.parquet)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--limit", type=int, default=0, help="score only this many edits per split")
+    ap.add_argument("--check-n", type=int, default=2000, help="edits per split for the float32 check")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
 
@@ -130,12 +131,16 @@ def main(argv=None):
             d = d.sample(min(len(d), args.limit), random_state=1)
         d = d.merge(preds[preds.split == split][["rev_id", "logit"]], on="rev_id")
         texts = d.text.tolist()
-        s32 = score(fp32, tok, texts, max_len)
+        # float32 only needs a spot check against PyTorch; the int8 file is
+        # what the browser runs, so it scores every edit.
+        check = np.random.default_rng(1).choice(len(d), min(len(d), args.check_n), replace=False)
+        s32 = score(fp32, tok, [texts[i] for i in check], max_len)
         s8 = score(int8, tok, texts, max_len)
         scored[split] = (d, s8)
         result[split] = {
             "n": len(d),
-            "fp32_vs_pytorch_max_abs_logit_diff": float(np.max(np.abs(s32 - d.logit.to_numpy()))),
+            "fp32_checked": int(len(check)),
+            "fp32_vs_pytorch_max_abs_logit_diff": float(np.max(np.abs(s32 - d.logit.to_numpy()[check]))),
             "int8_vs_pytorch_mean_abs_logit_diff": float(np.mean(np.abs(s8 - d.logit.to_numpy()))),
             "int8_vs_pytorch_p99_abs_logit_diff": float(np.percentile(np.abs(s8 - d.logit.to_numpy()), 99)),
             "pytorch_pr_auc": evaluate(d.label.to_numpy(), sigmoid(d.logit.to_numpy()))["pr_auc"],
