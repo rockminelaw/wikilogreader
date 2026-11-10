@@ -266,8 +266,25 @@ the slice's reverts that those flags catch.
   - 14% of test edits don't fit in 256 tokens.
   - On those, the teacher's lead over the tree shrinks from 0.105 to 0.034,
     and its recall at the top 2% (0.28) falls below the tree's (0.30).
-  - A run with a 384-token limit was started to test this, but it was cut off
-    when the PC shut down (see "Next").
+  - A longer input doesn't fix it. I trained a second teacher identically
+    except for a 384-token limit, which cuts 8.3% of training edits instead of
+    13.6%. It took 66 minutes to train, against 73.
+
+    | Test edits | Edits | 256-token teacher | 384-token teacher | Difference (paired interval) | Tree |
+    |---|---|---|---|---|---|
+    | All | 247,471 | 0.589 | 0.587 | -0.002 (-0.005 to 0.000) | 0.496 |
+    | Fit in 256 tokens | 212,768 | 0.595 | 0.593 | -0.002 (-0.004 to 0.001) | 0.490 |
+    | 257-384 tokens | 13,095 | 0.486 | 0.494 | +0.008 (-0.010 to 0.026) | 0.437 |
+    | Over 384 tokens | 21,608 | 0.586 | 0.581 | -0.006 (-0.014 to 0.002) | 0.557 |
+
+    Even on the edits that the longer limit lets it read in full (257-384
+    tokens), the gain is within noise. The table also shows why the lead
+    narrows on long edits: the teacher does about as well on them as on short
+    ones, but the tree does better on them (0.557 against 0.490), presumably
+    because size and count features say more about a long edit. The cut isn't
+    what holds the teacher back.
+  - Averaging the two teachers' logits gives 0.595, a gain of 0.006. That's
+    not worth twice the compute.
 - **Diff text loses context.** For a changed line, the input shows only the
   inserted and removed words, so turning a word into a link reads as
   `added: [[ ]]`. Showing a few words either side should help.
@@ -350,9 +367,9 @@ set (51,351 edits). It was limited by the diff backlog at the time.
 
 ## Next
 
-- **The 384-token teacher:** rerun the run that was cut off, to see whether a
-  longer input closes the gap on long edits. If it does, the student models in
-  phase 3 should use the longer input too, if the browser budget allows.
+- **Input length for the students:** 256 tokens, since 384 gained nothing.
+  Phase 3 can also test shorter limits, because a browser model's time grows
+  with input length.
 - **Phase 3:** distil the teacher into two student sizes, export them to ONNX,
   quantise to int8, and measure them in the browser against the budget.
 
@@ -360,6 +377,7 @@ set (51,351 edits). It was limited by the diff backlog at the time.
 
 ```
 python -m training.train_teacher --split v2 --epochs 1 --score-train --max-len 256 --exports EXPORTS --out runs/teacher-v2-256   # GPU
+python -m training.train_teacher --split v2 --epochs 1 --score-train --max-len 384 --exports EXPORTS --out runs/teacher-v2-384   # GPU
 python -m training.baselines     --split v2 --exports EXPORTS --out runs/baselines-v2
 python -m training.liftwing      --rev-ids v2_test_sample.parquet --out runs/v2-liftwing.jsonl
 python -m training.liftwing      --rev-ids v2_test_sample_anon.parquet --out runs/v2-liftwing-ml.jsonl \
