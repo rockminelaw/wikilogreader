@@ -63,7 +63,8 @@ def load(args, test, val):
     return df, info
 
 
-def charts(df, students, info, out):
+def charts(df, students, info, out, cut=None):
+    cut = cut or {}
     import matplotlib
 
     matplotlib.use("Agg")
@@ -99,19 +100,32 @@ def charts(df, students, info, out):
     # Size and speed against quality, for the students the browser would run.
     pts = [s for s in students if "bench" in info.get(s, {})]
     if pts:
-        fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.6), dpi=150, sharey=True)
+        fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.8), dpi=150, sharey=True)
         fig.patch.set_facecolor(SURFACE)
-        for ax, key, label in ((axes[0], "size", "Model download, int8 (MB)"),
-                               (axes[1], "latency", "Browser time per edit, median (ms)")):
+        for ax, key, label, limit in ((axes[0], "size", "Model download, int8 (MB)", 15),
+                                      (axes[1], "latency", "Browser time per edit (ms):\ndot median, line to 90th percentile", 50)):
             _style(ax)
             for ref, ls in (("teacher", "-"), ("gbdt_meta_diffstats", (0, (4, 3)))):
                 v = average_precision_score(y, df[ref])
                 ax.axhline(v, color=COLOUR[ref], linewidth=1.2, linestyle=ls)
+            ax.axvline(limit, color=INK2, linewidth=1, linestyle=(0, (1, 2)))
+            ax.text(limit, 1.0, f" limit {limit}{' MB' if key == 'size' else ' ms'}",
+                    transform=ax.get_xaxis_transform(), fontsize=7.5, color=INK2, va="top")
             for s in pts:
-                xv = info[s]["bytes_int8"] / 1e6 if key == "size" else info[s]["bench"]["median_ms"]
+                b = info[s]["bench"]
+                q = average_precision_score(y, df[s])
                 hard = s.endswith("_hard")
-                ax.scatter([xv], [average_precision_score(y, df[s])], s=46, zorder=3,
+                xv = info[s]["bytes_int8"] / 1e6 if key == "size" else b["median_ms"]
+                if key == "latency":
+                    ax.plot([b["median_ms"], b["p90_ms"]], [q, q], color=COLOUR[s], linewidth=1.5, zorder=2)
+                ax.scatter([xv], [q], s=46, zorder=3,
                            color=SURFACE if hard else COLOUR[s], edgecolor=COLOUR[s], linewidth=1.8)
+            # A student run with its input cut shorter (size unchanged).
+            for s, (n, q, b) in cut.items():
+                xv = info[s]["bytes_int8"] / 1e6 if key == "size" else b["median_ms"]
+                if key == "latency":
+                    ax.plot([b["median_ms"], b["p90_ms"]], [q, q], color=COLOUR[s], linewidth=1.5, zorder=2)
+                ax.scatter([xv], [q], s=46, marker="D", zorder=3, color=SURFACE, edgecolor=COLOUR[s], linewidth=1.8)
             ax.set_xlabel(label)
             ax.set_xlim(left=0)
         axes[0].set_ylabel("PR-AUC on the test days")
@@ -122,6 +136,9 @@ def charts(df, students, info, out):
         handles = [plt.Line2D([], [], marker="o", linestyle="", markersize=7, color=COLOUR[s],
                               markerfacecolor=SURFACE if s.endswith("_hard") else COLOUR[s],
                               label=names[s]) for s in pts]
+        handles += [plt.Line2D([], [], marker="D", linestyle="", markersize=6, color=COLOUR[s],
+                               markerfacecolor=SURFACE, label=f"{names[s].split(' (')[0]}, input cut to {n} tokens")
+                    for s, (n, _, _) in cut.items()]
         fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=7.5, frameon=False)
         fig.suptitle("What the browser students cost and how well they rank", x=0.02, ha="left",
                      fontsize=11, color=INK)
@@ -166,6 +183,9 @@ def main(argv=None):
     ap.add_argument("--baselines", required=True)
     ap.add_argument("--student", action="append", help="name=export folder (repeatable)")
     ap.add_argument("--bench", action="append", help="name=bench json (repeatable)")
+    ap.add_argument("--cut", action="append",
+                    help="name=tokens=shorter-inputs json=bench json, a student run with shorter input")
+    ap.add_argument("--charts-only", action="store_true", help="redraw the charts, skip the tables")
     ap.add_argument("--split", default="v2")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
@@ -178,6 +198,13 @@ def main(argv=None):
     models = ["teacher"] + [s for s in STUDENT_NAMES if s in students] + ["gbdt_meta_diffstats", "gbdt_meta",
                                                                           "rule_points"]
     y = df.label.to_numpy()
+    cut = {}
+    for c in args.cut or []:
+        name, n, sj, bj = c.split("=", 3)
+        cut[name] = (int(n), json.load(open(sj))[n]["pr_auc"], json.load(open(bj)))
+    if args.charts_only:
+        print(charts(df, students, info, args.out, cut))
+        return
     result = {"n_test": len(df), "positives": int(y.sum()), "info": info}
     result["table"] = table(df, models).to_dict("records")
 
@@ -218,7 +245,7 @@ def main(argv=None):
         for day, d in df.groupby("day")]
     result["at_2pct"] = {m: at_alert_rate(y, df[m].to_numpy(), 0.02) for m in models}
 
-    result["charts"] = charts(df, students, info, args.out)
+    result["charts"] = charts(df, students, info, args.out, cut)
     with open(os.path.join(args.out, "comparison.json"), "w") as f:
         json.dump(result, f, indent=2, default=float)
     for r in result["table"]:
