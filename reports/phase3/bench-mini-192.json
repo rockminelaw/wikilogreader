@@ -1,0 +1,17 @@
+{
+  "edits": 500,
+  "threads": 1,
+  "fetch_ms": 89,
+  "session_ms": 580,
+  "median_ms": 22.199999999254942,
+  "p90_ms": 42.5,
+  "p99_ms": 64.5,
+  "max_len_edits": 107,
+  "max_len_median_ms": 40.19999999925494,
+  "tokenise_median_ms": 0.2000000011175871,
+  "max_abs_logit_diff_vs_python": 0.05291390419006348,
+  "mean_tokens": 126.796,
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+  "cores": 2,
+  "model_bytes": 11373824
+}
