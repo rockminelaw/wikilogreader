@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Student model benchmark</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; background: #fcfcfb; color: #0b0b0b; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Student model benchmark</h1>
+<p>Scores real test edits one at a time in this browser with onnxruntime-web
+(WebAssembly, one thread), tokenising included, and checks the scores against
+onnxruntime in Python.</p>
+<pre id="out">Loading…</pre>
+<script type="module">
+// Query string: ?model=DIR&cases=FILE&threads=1
+import { WordPiece } from "./wordpiece.mjs";
+
+const q = new URLSearchParams(location.search);
+const dir = q.get("model") || "model";
+const casesUrl = q.get("cases") || `${dir}/bench-cases.json`;
+const threads = Number(q.get("threads") || 1);
+const out = document.getElementById("out");
+const show = (s) => { out.textContent = s; };
+
+async function main() {
+  const ort = await import("./ort/ort.wasm.min.mjs");
+  ort.env.wasm.wasmPaths = new URL("./ort/", location.href).href;
+  ort.env.wasm.numThreads = threads;
+
+  const t0 = performance.now();
+  const [vocab, settings, model, cases] = await Promise.all([
+    fetch(`${dir}/vocab.txt`).then((r) => r.text()),
+    fetch(`${dir}/tokenizer.json`).then((r) => r.json()),
+    fetch(`${dir}/model.onnx`).then((r) => r.arrayBuffer()),
+    fetch(casesUrl).then((r) => r.json()),
+  ]);
+  const t1 = performance.now();
+  const tok = new WordPiece(vocab, { lowercase: settings.lowercase, maxLen: settings.max_len });
+  const session = await ort.InferenceSession.create(model, { executionProviders: ["wasm"],
+    graphOptimizationLevel: "all" });
+  const t2 = performance.now();
+
+  async function score(text) {
+    const ids = tok.encode(text);
+    const n = ids.length;
+    const input = new ort.Tensor("int64", BigInt64Array.from(ids, BigInt), [1, n]);
+    const mask = new ort.Tensor("int64", new BigInt64Array(n).fill(1n), [1, n]);
+    const res = await session.run({ input_ids: input, attention_mask: mask });
+    return { logit: res.logit.data[0], n };
+  }
+
+  for (const c of cases.slice(0, 10)) await score(c.text); // warm-up
+
+  const times = [], tokTimes = [], diffs = [], lens = [];
+  for (const c of cases) {
+    const a = performance.now();
+    tok.encode(c.text);
+    tokTimes.push(performance.now() - a);
+    const b = performance.now();
+    const { logit, n } = await score(c.text);
+    times.push(performance.now() - b);
+    diffs.push(Math.abs(logit - c.logit));
+    if (q.get("debug")) (window.debugRows ||= []).push({ rev_id: c.rev_id, js: logit, py: c.logit, n });
+    lens.push(n);
+  }
+  const pct = (xs, p) => { const s = [...xs].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
+  const long = times.filter((_, i) => lens[i] >= settings.max_len);
+  const result = {
+    edits: cases.length, threads,
+    fetch_ms: Math.round(t1 - t0), session_ms: Math.round(t2 - t1),
+    median_ms: pct(times, 0.5), p90_ms: pct(times, 0.9), p99_ms: pct(times, 0.99),
+    max_len_edits: long.length, max_len_median_ms: long.length ? pct(long, 0.5) : null,
+    tokenise_median_ms: pct(tokTimes, 0.5),
+    max_abs_logit_diff_vs_python: Math.max(...diffs),
+    mean_tokens: lens.reduce((x, y) => x + y, 0) / lens.length,
+    user_agent: navigator.userAgent, cores: navigator.hardwareConcurrency,
+  };
+  window.benchResult = result;
+  show(JSON.stringify(result, null, 2));
+}
+
+main().catch((e) => { window.benchError = String(e && e.stack || e); show(window.benchError); });
+</script>
+</body>
+</html>

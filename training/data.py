@@ -207,7 +207,31 @@ def edit_text(row, diff_chars: int = 1400) -> str:
     )
 
 
-def add_text(df: pd.DataFrame, diff_chars: int = 1400) -> pd.DataFrame:
+def capitals_line(added) -> str:
+    """The small student models lowercase their input, so they can't see
+    shouting. This line tells them how much of the added text is capitals."""
+    s = "" if added is None or (isinstance(added, float) and math.isnan(added)) else str(added)
+    letters = sum(1 for c in s if "a" <= c.lower() <= "z" and c.isascii())
+    if letters < 20:
+        return "capitals: too little text"
+    caps = sum(1 for c in s if "A" <= c <= "Z")
+    share = caps / letters
+    for limit, label in ((0.1, "few"), (0.3, "some"), (0.7, "many")):
+        if share < limit:
+            return f"capitals: {label}"
+    return "capitals: mostly"
+
+
+def student_text(row, diff_chars: int = 1400) -> str:
+    """The teacher's input with the capitals line added before the diff, so
+    cutting a long input never drops it."""
+    t = edit_text(row, diff_chars)
+    i = t.index("\nremoved: ")
+    return t[:i] + "\n" + capitals_line(row["added_text"]) + t[i:]
+
+
+def add_text(df: pd.DataFrame, diff_chars: int = 1400, fn=None) -> pd.DataFrame:
+    fn = fn or edit_text
     df = df.copy()
-    df["text"] = [edit_text(r, diff_chars) for r in df.to_dict("records")]
+    df["text"] = [fn(r, diff_chars) for r in df.to_dict("records")]
     return df
