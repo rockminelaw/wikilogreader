@@ -1,12 +1,38 @@
 # wikilogreader
 
-Data collection for a small model that predicts which English Wikipedia edits
-will be reverted. This is phase 1: a collector that records edits as they
-happen, fetches each edit's diff, and labels it 48 hours later with whether it
-was reverted and how quickly.
+A small model that predicts which English Wikipedia edits will be reverted,
+and everything it took to build it. The model runs in the browser on
+[lawrenceqi.com](https://lawrenceqi.com/projects/wikipedia-live-edits/).
 
-Later phases (baselines, a teacher model, a distilled student that runs in the
-browser) will live in this repo too.
+| Phase | What | Where |
+|---|---|---|
+| 1 | A collector that records edits as they happen, fetches each edit's diff, and labels it 48 hours later with whether it was reverted and how quickly | `wikirevert/`, this README |
+| 2 | Baselines, Wikimedia's revert-risk models and a DeBERTa-v3 teacher | `training/`, [reports/phase2.md](reports/phase2.md) |
+| 3 | Students distilled from the teacher, int8 ONNX, browser timings | `training/distil.py`, `training/export_onnx.py`, `web/`, [reports/phase3.md](reports/phase3.md) |
+| 4 | The files the website loads | `training/web_bundle.py`, `web/edit-text.mjs` |
+
+### The browser version (phase 4)
+
+The website scores live edits with BERT-mini, its input cut to 128 tokens.
+`training/web_bundle.py` writes the three files it loads: `model.onnx`,
+`vocab.txt` and `config.json` (calibration, the 50% flag threshold, and how
+that threshold did on the test days: 2.4% of edits flagged, 75% of them
+reverted, 32% of all reverts caught).
+
+The browser has to turn an edit into exactly the text the model was trained
+on, so `web/edit-text.mjs` copies the Python pipeline function by function,
+and `web/wordpiece.mjs` copies the tokeniser. Checks against the Python
+versions:
+
+```
+node web/test-edit-text.mjs text CASES.jsonl     # edit -> model text, from exported rows
+node web/test-edit-text.mjs parse CASES.jsonl    # stream events and editor/tag responses
+python web/test-diffs.py DIFFS.jsonl             # diff extraction, in headless Chromium
+node web/test-tokeniser.mjs vocab.txt CASES.jsonl
+```
+
+On the last runs they matched on 20,476 exported edits, 1,987 stream events
+and API responses, 114 real diffs and 20,017 tokeniser cases.
 
 ## What it collects
 

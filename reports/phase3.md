@@ -377,6 +377,11 @@ Two students meet both limits on this machine:
 Before the demo is built, I'd want to time both on a real mid-range laptop
 and a phone, using `web/bench.html`.
 
+**Chosen:** BERT-mini with its input cut to 128 tokens. The website flags an
+edit when its calibrated score is 50% or more. On the test days that flagged
+2.4% of edits; 75% of the flagged edits were reverted, and the flags caught 32%
+of all reverts (`training/web_bundle.py`).
+
 ## Reproducing
 
 ```
