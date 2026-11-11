@@ -173,9 +173,10 @@ All three models are under the 15 MB limit. The page also needs:
 - **If nothing is compressed:** BERT-tiny 19.0 MB, BERT-mini 25.9 MB.
 
 The runtime is bigger than either model, so the 15 MB limit only holds for
-the whole page if the WebAssembly file is compressed. I haven't checked
-whether the site's host compresses `.wasm` and `.onnx` files. Browsers cache
-all of it after the first visit.
+the whole page if the WebAssembly file is compressed. Checked after phase 4
+went live: GitHub Pages sends both gzipped (the runtime as 3.72 MB, BERT-mini
+as 8.18 MB), so a first visit downloads about 12 MB. Browsers cache all of it
+after that.
 
 ### Speed in the browser
 
@@ -353,7 +354,7 @@ alert rate:
   under 50 ms on long edits means cutting its input, which costs 0.011
   PR-AUC.
 - **The download is bigger than the model.** The runtime adds 3.7 MB
-  compressed, or 14.2 MB if the host doesn't compress it.
+  compressed (GitHub Pages compresses it), or 14.2 MB where a host doesn't.
 - **One training run each.** Every student was trained once, with one seed.
   The intervals above cover the test edits, not training randomness.
 
